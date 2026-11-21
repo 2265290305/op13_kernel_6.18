@@ -18,7 +18,10 @@ B=$ROOT/out/boot
 T=$B/stage
 ST=$ROOT/device/op13/stock
 REL=$(cat "$O/include/config/kernel.release")
-CMDLINE=${CMDLINE:-op13_modload_tolerate=1 printk.devkmsg=on log_buf_len=8M}
+# The reference's own boot options (tools/ak3/anykernel-618.sh), where they are not Xiaomi's: an oops
+# in a driver is not a panic, the vendor's per-task area in task_struct (GKI sizes it at boot), no
+# console on the debug UART, proxy execution off, Qualcomm's CMA use.
+CMDLINE=${CMDLINE:-op13_modload_tolerate=1 printk.devkmsg=on log_buf_len=16M sysctl.kernel.panic_on_oops=0 sysctl.kernel.printk=1 panic=5 initcall_blacklist=qcom_geni_serial_init android_arch_task_struct_size=1024 sched_proxy_exec=0 erofs.reserved_pages=64 restrict_cma_redirect=false sysctl.kernel.sched_util_clamp_min_rt_default=0}
 [ -f "$O/Module.symvers" ] || { echo "build_bootimg: build the kernel first"; exit 1; }
 # an image without the SoC modules cannot get past the first stage: none at all, rather than one
 # that only looks testable
