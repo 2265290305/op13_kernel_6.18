@@ -43,8 +43,9 @@ CMDLINE=${CMDLINE:-op13_modload_tolerate=1 op13_deadline=180 $BASE}
 rm -rf "$B" && mkdir -p "$T/rd/lib/modules" "$T/mods/lib/modules/$REL/kernel" "$B/helpers"
 
 # the batch loader (a module) and its helper (a static program: the first-stage ramdisk has no libc)
-cp "$ROOT/modules/k618_load.c" "$B/helpers/"
-echo "obj-m += k618_load.o" > "$B/helpers/Kbuild"
+# (k618_probe: the reference's log writer, loaded only by boot-rawlog.img -- see below)
+cp "$ROOT/modules/k618_load.c" "$ROOT/modules/k618_probe.c" "$B/helpers/"
+echo "obj-m += k618_load.o k618_probe.o" > "$B/helpers/Kbuild"
 "${KMAKE[@]}" M="$B/helpers" modules > "$B/helpers/build.log" 2>&1 || { tail -20 "$B/helpers/build.log"; exit 1; }
 clang --target=aarch64-linux-gnu -O2 -nostdlib -static -ffreestanding -fno-stack-protector \
 	-fuse-ld=lld -Wl,--build-id=none -s -o "$T/rd/k618_umh" "$ROOT/modules/k618_umh.c"
@@ -55,7 +56,7 @@ chmod 755 "$T/rd/k618_umh"
 # modules_install (already stripped and signed), where no vendor module has the same name
 K=$T/mods/lib/modules/$REL/kernel
 SIGN() { "$O/scripts/sign-file" sha256 "$O/certs/signing_key.pem" "$O/certs/signing_key.x509" "$1"; }
-for f in $(find "$S" -name '*.ko') "$ROOT"/out/tpmods/*.ko "$ROOT"/out/oplusmods/*.ko "$B/helpers/k618_load.ko"; do
+for f in $(find "$S" -name '*.ko') "$ROOT"/out/tpmods/*.ko "$ROOT"/out/oplusmods/*.ko "$B"/helpers/*.ko; do
 	[ -f "$f" ] || continue
 	llvm-strip --strip-debug -o "$K/$(basename "$f")" "$f"
 	SIGN "$K/$(basename "$f")"
@@ -91,9 +92,32 @@ python3 -I "$ROOT/scripts/mklists.py" "$T/rd/lib/modules" "$ST" "$B"
 python3 -I "$REF/k618_stage_crc.py" "$O/Module.symvers" "$T/rd/lib/modules" | tail -12
 [ "${PIPESTATUS[0]}" = 0 ] || { echo "build_bootimg: symbol versions differ (above): no image"; exit 1; }
 
+# boot-rawlog.img: the same layer, plus the reference's log writer (k618_probe, in no list of
+# boot.img's) first in the first stage. It writes the kernel log onto the partition named rawdump
+# -- only one whose partition-table name is that -- every 2 s, before every module of the batch
+# (k618_load calls its flush) and from the panic notifier: two whole copies in turns and a 16 MB
+# ring, 28 MB from the partition's start, which a write cannot leave. For a boot whose RAM log does
+# not survive the reset; read back with: dd if=/dev/block/by-name/rawdump bs=1M count=28.
+cp -a "$T/rd" "$T/rd-rawlog"
+python3 -I - "$T/rd-rawlog/lib/modules" <<'PY'
+import sys
+d = sys.argv[1]
+load = open(f"{d}/modules.load").read().split()
+assert "k618_probe.ko" not in load and load[-1] == "k618_load.ko"
+open(f"{d}/modules.load", "w").write("".join(m + "\n" for m in ["k618_probe.ko"] + load))
+sd = open(f"{d}/modules.softdep").read()
+assert "softdep k618_load pre: " in sd
+open(f"{d}/modules.softdep", "w").write(sd.replace("softdep k618_load pre: ", "softdep k618_load pre: k618_probe ", 1))
+open(f"{d}/modules.options", "a").write(
+    "options k618_probe probe_ms=0 log_part=rawdump log_from=metadata log_start_ms=300 "
+    "log_poll_ms=20 log_every_ms=2000 log_slot_kb=4096 log_buf_kb=4096 "
+    "log_ring_kb=16384 log_ring_ms=20 log_ring_keep_kb=4096\n")
+PY
+
 # the layer, built into the kernel: INITRAMFS_SOURCE set and the Image relinked (INITRAMFS_FORCE
 # stays off, or the phone's own ramdisks would not be unpacked at all)
 (cd "$T/rd" && find lib k618_umh | sort | cpio -o -H newc -R 0:0 --quiet) > "$B/initramfs.cpio"
+(cd "$T/rd-rawlog" && find lib k618_umh | sort | cpio -o -H newc -R 0:0 --quiet) > "$B/initramfs-rawlog.cpio"
 echo "build_bootimg: layer $(du -h "$B/initramfs.cpio" | cut -f1) uncompressed"
 cp "$O/Module.symvers" "$B/Module.symvers.before"
 # diag-nolayer.img: the same kernel without our modules, loading the phone's 6.6 ones (which it
@@ -101,15 +125,18 @@ cp "$O/Module.symvers" "$B/Module.symvers.before"
 # minute or so -- if the kernel itself gets that far. It stays on the logo only if it does not.
 python3 "$ROOT/src/mkbootimg/mkbootimg.py" --header_version 4 --kernel "$O/arch/arm64/boot/Image" \
 	--cmdline "$BASE" -o "$B/diag-nolayer.img"
-"$C/scripts/config" --file "$O/.config" --set-str INITRAMFS_SOURCE "$B/initramfs.cpio" -d INITRAMFS_FORCE
-"${KMAKE[@]}" olddefconfig > /dev/null
-"${KMAKE[@]}" -j"$J" Image > "$B/relink.log" 2>&1 || { tail -30 "$B/relink.log"; exit 1; }
-# the exports and their CRCs must stay what the modules were built against
-cmp -s <(awk -F'\t' '$3 == "vmlinux"' "$B/Module.symvers.before" | sort) <(sort "$O/vmlinux.symvers") \
-	|| { echo "build_bootimg: the relinked kernel's exports differ from the modules' build"; exit 1; }
-
-python3 "$ROOT/src/mkbootimg/mkbootimg.py" --header_version 4 --kernel "$O/arch/arm64/boot/Image" \
-	--cmdline "$CMDLINE" -o "$B/boot.img"
+relink() {	# relink <initramfs> <image>
+	"$C/scripts/config" --file "$O/.config" --set-str INITRAMFS_SOURCE "$1" -d INITRAMFS_FORCE
+	"${KMAKE[@]}" olddefconfig > /dev/null
+	"${KMAKE[@]}" -j"$J" Image > "$B/relink.log" 2>&1 || { tail -30 "$B/relink.log"; exit 1; }
+	# the exports and their CRCs must stay what the modules were built against
+	cmp -s <(awk -F'\t' '$3 == "vmlinux"' "$B/Module.symvers.before" | sort) <(sort "$O/vmlinux.symvers") \
+		|| { echo "build_bootimg: the relinked kernel's exports differ from the modules' build"; exit 1; }
+	python3 "$ROOT/src/mkbootimg/mkbootimg.py" --header_version 4 --kernel "$O/arch/arm64/boot/Image" \
+		--cmdline "$CMDLINE" -o "$2"
+}
+relink "$B/initramfs-rawlog.cpio" "$B/boot-rawlog.img"
+relink "$B/initramfs.cpio" "$B/boot.img"
 # back to a kernel without the layer, so the next module build sees the configuration it expects
 "$C/scripts/config" --file "$O/.config" --set-str INITRAMFS_SOURCE ""
 "${KMAKE[@]}" olddefconfig > /dev/null
