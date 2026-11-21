@@ -88,6 +88,64 @@ EOF
 	echo "op13_ramoops= reservation added"
 fi
 
+# op13_deadline=<seconds>: a boot that has not started zygote by then is stopped -- where every
+# blocked task waits, every CPU's stack, then a panic -- so that a hung bring-up boot ends in a
+# (warm, with reboot=warm) restart that keeps its log in ramoops, instead of in a forced reset that
+# loses it. Once zygote has run, it does nothing.
+PA=$C/kernel/panic.c
+if ! grep -q 'op13_deadline' $PA; then
+	cat >> $PA <<'EOF'
+
+/* op13: see tools/prep_common.sh */
+#include <linux/sched/signal.h>
+#include <linux/workqueue.h>
+
+static unsigned int op13_deadline;
+core_param(op13_deadline, op13_deadline, uint, 0444);
+
+static bool op13_zygote_seen(void)
+{
+	struct task_struct *p;
+	bool seen = false;
+
+	rcu_read_lock();
+	for_each_process(p) {
+		if (!strncmp(p->comm, "zygote", 6)) {
+			seen = true;
+			break;
+		}
+	}
+	rcu_read_unlock();
+	return seen;
+}
+
+static void op13_deadline_fn(struct work_struct *work)
+{
+	if (op13_zygote_seen()) {
+		pr_emerg("op13: zygote is up, boot deadline off\n");
+		return;
+	}
+	pr_emerg("op13: no zygote %u s into the boot: blocked tasks, CPUs, then a panic\n",
+		 op13_deadline);
+	show_state_filter(TASK_UNINTERRUPTIBLE);
+	trigger_all_cpu_backtrace();
+	mdelay(500);
+	panic("op13: boot deadline (%u s) reached", op13_deadline);
+}
+static DECLARE_DELAYED_WORK(op13_deadline_work, op13_deadline_fn);
+
+static int __init op13_deadline_init(void)
+{
+	if (op13_deadline)
+		queue_delayed_work(system_highpri_wq, &op13_deadline_work, op13_deadline * HZ);
+	return 0;
+}
+late_initcall(op13_deadline_init);
+EOF
+	grep -q 'late_initcall(op13_deadline_init)' $PA || { echo "boot deadline: edit failed"; exit 1; }
+	echo "op13_deadline= boot deadline added"
+fi
+
 # built-in initramfs (our module layer) unpacked after the bootloader's ramdisks, so it wins
 python3 -I - "$REF" "$C" <<'PY'
 import sys

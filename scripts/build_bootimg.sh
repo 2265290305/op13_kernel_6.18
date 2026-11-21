@@ -25,8 +25,13 @@ REL=$(cat "$O/include/config/kernel.release")
 # console 0x40000 then pmsg 0x200000, as the DT's qcom,ramoops node lays it out), from the built-in
 # ramoops and the reservation tools/prep_common.sh adds -- the stock kernel shows it after the next boot
 RAMOOPS="op13_ramoops=0x240000@0x880000000 ramoops.mem_address=0x880000000 ramoops.mem_size=0x240000 ramoops.console_size=0x40000 ramoops.pmsg_size=0x200000 ramoops.record_size=0 ramoops.ftrace_size=0 ramoops.mem_type=2 ramoops.ecc=0"
+# warm restarts (PSCI SYSTEM_RESET2), which keep RAM -- a cold one loses the log above -- and no
+# Qualcomm crash-dump mode on a panic: a restart, not the 900E dump mode with its black screen
+RAMOOPS="$RAMOOPS reboot=warm qcom_dload_mode.download_mode=0"
 BASE="printk.devkmsg=on log_buf_len=16M sysctl.kernel.panic_on_oops=0 sysctl.kernel.printk=1 panic=5 initcall_blacklist=qcom_geni_serial_init android_arch_task_struct_size=1024 sched_proxy_exec=0 erofs.reserved_pages=64 restrict_cma_redirect=false sysctl.kernel.sched_util_clamp_min_rt_default=0 $RAMOOPS"
-CMDLINE=${CMDLINE:-op13_modload_tolerate=1 $BASE}
+# the full image: modules that do not load are logged, and no zygote after 3 minutes ends the boot
+# with the blocked tasks in the log (tools/prep_common.sh, op13_deadline)
+CMDLINE=${CMDLINE:-op13_modload_tolerate=1 op13_deadline=180 $BASE}
 [ -f "$O/Module.symvers" ] || { echo "build_bootimg: build the kernel first"; exit 1; }
 # an image without the SoC modules cannot get past the first stage: none at all, rather than one
 # that only looks testable
