@@ -22,9 +22,10 @@ REL=$(cat "$O/include/config/kernel.release")
 # in a driver is not a panic, the vendor's per-task area in task_struct (GKI sizes it at boot), no
 # console on the debug UART, proxy execution off, Qualcomm's CMA use.
 # RAMOOPS: the log where the stock kernel keeps its own (its ramoops: 0x240000@0x880000000, ecc 0,
-# console 0x40000 then pmsg 0x200000, as the DT's qcom,ramoops node lays it out), from the built-in
+# console 0x40000 then pmsg 0x200000, as the DT's qcom,ramoops node lays it out; written write-combined,
+# not cached as the stock kernel maps it, so nothing is left in a cache at a reset), from the built-in
 # ramoops and the reservation tools/prep_common.sh adds -- the stock kernel shows it after the next boot
-RAMOOPS="op13_ramoops=0x240000@0x880000000 ramoops.mem_address=0x880000000 ramoops.mem_size=0x240000 ramoops.console_size=0x40000 ramoops.pmsg_size=0x200000 ramoops.record_size=0 ramoops.ftrace_size=0 ramoops.mem_type=2 ramoops.ecc=0"
+RAMOOPS="op13_ramoops=0x240000@0x880000000 ramoops.mem_address=0x880000000 ramoops.mem_size=0x240000 ramoops.console_size=0x40000 ramoops.pmsg_size=0x200000 ramoops.record_size=0 ramoops.ftrace_size=0 ramoops.mem_type=0 ramoops.ecc=0"
 # warm restarts (PSCI SYSTEM_RESET2), which keep RAM -- a cold one loses the log above -- and no
 # Qualcomm crash-dump mode on a panic: a restart, not the 900E dump mode with its black screen
 RAMOOPS="$RAMOOPS reboot=warm qcom_dload_mode.download_mode=0"
