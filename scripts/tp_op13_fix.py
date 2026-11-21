@@ -15,6 +15,11 @@ EDITS = [
      "static void kgsl_shmem_fill_page(",
      "#if (KERNEL_VERSION(6, 12, 18) <= LINUX_VERSION_CODE)\n"
      "static void kgsl_shmem_fill_page("),
+    # display_modules.bzl lists msm/hdmi/hdmi_power.c among the HDMI sources (sun's conf has HDMI
+    # on), the Kbuild does not (modpost: hdmi_power_put undefined)
+    ("display-drivers/msm/Kbuild",
+     "\t\t\t\thdmi/hdmi_pll_snps.o \\\n",
+     "\t\t\t\thdmi/hdmi_pll_snps.o \\\n\t\t\t\thdmi/hdmi_power.o \\\n"),
 ]
 
 
@@ -26,10 +31,12 @@ def main(argv):
         if not os.path.exists(path):
             continue
         text = open(path, encoding="utf-8", errors="surrogateescape").read()
+        if new in text:
+            continue
         if old in text:
             open(path, "w", encoding="utf-8", errors="surrogateescape", newline="").write(text.replace(old, new))
             n += 1
-        elif new not in text:
+        else:
             print(f"tp_op13_fix: {rel}: text to change not found", file=sys.stderr)
             return 1
     print(f"tp_op13_fix: {n} changes")

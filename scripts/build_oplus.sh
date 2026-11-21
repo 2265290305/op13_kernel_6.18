@@ -16,23 +16,26 @@ rm -rf "$W" "$OUTM" && mkdir -p "$W/inc/soc/oplus" "$OUTM" "$LOG"
 ln -s "$SRC/include" "$W/inc/soc/oplus/boot"
 ln -s "$SRC/include" "$W/inc/soc/oplus/system"
 
-# name | directory | make variables
+# name | directory | make variables | extra compiler flags
 SETS=(
 	"cmdline_parser|cmdline_parser|CONFIG_OPLUS_FEATURE_OPLUSBOOT=m CONFIG_OPLUS_FEATURE_FTMMODE=m CONFIG_OPLUS_FEATURE_CHARGERPRESENT=m CONFIG_OPLUS_FEATURE_BUILDVARIANT=m CONFIG_OPLUS_FEATURE_CDT=m"
 	"bootmode|bootmode|CONFIG_OPLUS_FEATURE_BOOTMODE=m"
 	# the stock module reports SM8750 / QCOM
-	"projectinfo|oplus_projectinfo|CONFIG_OPLUS_SYSTEM_KERNEL_QCOM=y CONFIG_OPLUS_FEATURE_OPROJECT=m OPLUS_VND_BUILD_PLATFORM=SM8750 OPLUS_VND_BUILD_CHIPSET_COMPANY=QCOM"
+	"projectinfo|oplus_projectinfo|CONFIG_OPLUS_SYSTEM_KERNEL_QCOM=y CONFIG_OPLUS_FEATURE_OPROJECT=m OPLUS_VND_BUILD_PLATFORM=SM8750 OPLUS_VND_BUILD_CHIPSET_COMPANY=QCOM|-DCONFIG_OPLUS_SYSTEM_KERNEL_QCOM=1"
 	"bootloader_log|bootloader_log|CONFIG_OPLUS_FEATURE_BOOTLOADER_LOG=m"
 )
 SYMS=$S/Module.symvers
 ok=0; bad=0
 for entry in "${SETS[@]}"; do
-	IFS='|' read -r name dir vars <<< "$entry"
+	IFS='|' read -r name dir vars defs <<< "$entry"
 	cp -r "$SRC/$dir" "$W/$name"
+	# the reference's 6.12 -> 6.18 API sweeps, then this port's own edits
+	python3 -I "$REF/k618_fix618.py" "$W/$name" | grep -v 'k618_fix618: 0 files changed' || true
+	python3 -I "$ROOT/scripts/oplus_fix.py" "$W/$name"
 	set +e
 	# shellcheck disable=SC2086
 	"${KMAKE[@]}" M="$W/$name" modules -j"$J" KBUILD_EXTRA_SYMBOLS="$SYMS" \
-		NOSTDINC_FLAGS="-nostdinc -I$S/include -I$W/inc" KCFLAGS="-Wno-error" $vars > "$LOG/$name.log" 2>&1
+		NOSTDINC_FLAGS="-nostdinc -I$S/include -I$W/inc" KCFLAGS="-Wno-error $defs" $vars > "$LOG/$name.log" 2>&1
 	rc=$?
 	set -e
 	echo "build_oplus: $name: make exit $rc, $(find "$W/$name" -name '*.ko' | wc -l) modules"
