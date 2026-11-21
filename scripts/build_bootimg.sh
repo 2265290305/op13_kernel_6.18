@@ -21,7 +21,12 @@ REL=$(cat "$O/include/config/kernel.release")
 # The reference's own boot options (tools/ak3/anykernel-618.sh), where they are not Xiaomi's: an oops
 # in a driver is not a panic, the vendor's per-task area in task_struct (GKI sizes it at boot), no
 # console on the debug UART, proxy execution off, Qualcomm's CMA use.
-CMDLINE=${CMDLINE:-op13_modload_tolerate=1 printk.devkmsg=on log_buf_len=16M sysctl.kernel.panic_on_oops=0 sysctl.kernel.printk=1 panic=5 initcall_blacklist=qcom_geni_serial_init android_arch_task_struct_size=1024 sched_proxy_exec=0 erofs.reserved_pages=64 restrict_cma_redirect=false sysctl.kernel.sched_util_clamp_min_rt_default=0}
+# RAMOOPS: the log where the stock kernel keeps its own (its ramoops: 0x240000@0x880000000, ecc 0,
+# console 0x40000 then pmsg 0x200000, as the DT's qcom,ramoops node lays it out), from the built-in
+# ramoops and the reservation tools/prep_common.sh adds -- the stock kernel shows it after the next boot
+RAMOOPS="op13_ramoops=0x240000@0x880000000 ramoops.mem_address=0x880000000 ramoops.mem_size=0x240000 ramoops.console_size=0x40000 ramoops.pmsg_size=0x200000 ramoops.record_size=0 ramoops.ftrace_size=0 ramoops.mem_type=2 ramoops.ecc=0"
+BASE="printk.devkmsg=on log_buf_len=16M sysctl.kernel.panic_on_oops=0 sysctl.kernel.printk=1 panic=5 initcall_blacklist=qcom_geni_serial_init android_arch_task_struct_size=1024 sched_proxy_exec=0 erofs.reserved_pages=64 restrict_cma_redirect=false sysctl.kernel.sched_util_clamp_min_rt_default=0 $RAMOOPS"
+CMDLINE=${CMDLINE:-op13_modload_tolerate=1 $BASE}
 [ -f "$O/Module.symvers" ] || { echo "build_bootimg: build the kernel first"; exit 1; }
 # an image without the SoC modules cannot get past the first stage: none at all, rather than one
 # that only looks testable
@@ -77,6 +82,11 @@ python3 -I "$REF/k618_stage_crc.py" "$O/Module.symvers" "$T/rd/lib/modules" | ta
 (cd "$T/rd" && find lib k618_umh | sort | cpio -o -H newc -R 0:0 --quiet) > "$B/initramfs.cpio"
 echo "build_bootimg: layer $(du -h "$B/initramfs.cpio" | cut -f1) uncompressed"
 cp "$O/Module.symvers" "$B/Module.symvers.before"
+# diag-nolayer.img: the same kernel without our modules, loading the phone's 6.6 ones (which it
+# refuses, without op13_modload_tolerate): first-stage init gives up and reboots on its own within a
+# minute or so -- if the kernel itself gets that far. It stays on the logo only if it does not.
+python3 "$ROOT/src/mkbootimg/mkbootimg.py" --header_version 4 --kernel "$O/arch/arm64/boot/Image" \
+	--cmdline "$BASE" -o "$B/diag-nolayer.img"
 "$C/scripts/config" --file "$O/.config" --set-str INITRAMFS_SOURCE "$B/initramfs.cpio" -d INITRAMFS_FORCE
 "${KMAKE[@]}" olddefconfig > /dev/null
 "${KMAKE[@]}" -j"$J" Image > "$B/relink.log" 2>&1 || { tail -30 "$B/relink.log"; exit 1; }

@@ -55,6 +55,39 @@ if ! grep -q 'op13_modload_tolerate' $MM; then
 	echo "module load tolerance (op13_modload_tolerate) added"
 fi
 
+# op13_ramoops=<size>@<address>: that RAM kept out of the kernel's hands from the start, for the
+# built-in ramoops (ramoops.mem_address= etc. on the command line). The stock 6.6 kernel's ramoops
+# region is allocated at boot (ramoops-region in the DT has no fixed address) and lands at
+# 0x880000000 there; a test kernel writing its log to the same place, with the same layout, leaves it
+# for the stock kernel to show in /sys/fs/pstore after the next boot -- from the first printk on,
+# not only once the first-stage modules load.
+RO=$C/fs/pstore/ram.c
+if ! grep -q 'op13_ramoops' $RO; then
+	perl -0pi -e 's|(#include <linux/module.h>\n)|$1#include <linux/memblock.h>\n|' $RO
+	cat >> $RO <<'EOF'
+
+/* op13: see tools/prep_common.sh */
+static int __init op13_ramoops_reserve(char *s)
+{
+	phys_addr_t size, base;
+
+	if (!s)
+		return -EINVAL;
+	size = memparse(s, &s);
+	if (*s != '@' || !size)
+		return -EINVAL;
+	base = memparse(s + 1, &s);
+	if (memblock_is_region_reserved(base, size))
+		pr_warn("op13_ramoops: %pa+%pa is reserved already\n", &base, &size);
+	return memblock_reserve(base, size);
+}
+early_param("op13_ramoops", op13_ramoops_reserve);
+EOF
+	grep -q '#include <linux/memblock.h>' $RO && grep -q 'early_param("op13_ramoops"' $RO \
+		|| { echo "ramoops reservation: edit failed"; exit 1; }
+	echo "op13_ramoops= reservation added"
+fi
+
 # built-in initramfs (our module layer) unpacked after the bootloader's ramdisks, so it wins
 python3 -I - "$REF" "$C" <<'PY'
 import sys

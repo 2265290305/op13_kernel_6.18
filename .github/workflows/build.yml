@@ -91,7 +91,7 @@ jobs:
           cp -r out/oplus-log dist/logs/ 2>/dev/null || true
           cp out/*.log out/*.txt dist/logs/ 2>/dev/null || true
           cp out/soc-kconfig/.config dist/logs/soc.config 2>/dev/null || true
-          cp out/boot/boot.img dist/ 2>/dev/null || true
+          cp out/boot/*.img dist/ 2>/dev/null || true
           cp out/boot/*.txt out/boot/*.log out/boot/depmod.err dist/logs/ 2>/dev/null || true
           cp -r out/boot/stage/rd/lib/modules dist/layer-modules 2>/dev/null && rm -f dist/layer-modules/*.ko || true
           echo "soc modules: $(ls dist/soc/*.ko 2>/dev/null | wc -l), techpack modules: $(ls dist/tp/*.ko 2>/dev/null | wc -l)"
