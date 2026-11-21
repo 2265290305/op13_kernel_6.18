@@ -111,7 +111,7 @@ open(f"{d}/modules.softdep", "w").write(sd.replace("softdep k618_load pre: ", "s
 open(f"{d}/modules.options", "a").write(
     "options k618_probe probe_ms=0 log_part=rawdump log_from=metadata log_start_ms=300 "
     "log_poll_ms=20 log_every_ms=2000 log_slot_kb=4096 log_buf_kb=4096 "
-    "log_ring_kb=16384 log_ring_ms=20 log_ring_keep_kb=4096\n")
+    "log_ring_kb=16384 log_ring_ms=20 log_ring_keep_kb=4096 log_stall_ms=5000\n")
 PY
 
 # the layer, built into the kernel: INITRAMFS_SOURCE set and the Image relinked (INITRAMFS_FORCE
