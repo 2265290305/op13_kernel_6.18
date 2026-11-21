@@ -125,6 +125,7 @@ static void op13_deadline_fn(struct work_struct *work)
 		pr_emerg("op13: zygote is up, boot deadline off\n");
 		return;
 	}
+	console_verbose();	/* the task dump is KERN_INFO: past the bootloader's loglevel */
 	pr_emerg("op13: no zygote %u s into the boot: blocked tasks, CPUs, then a panic\n",
 		 op13_deadline);
 	show_state_filter(TASK_UNINTERRUPTIBLE);
