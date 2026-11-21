@@ -1,0 +1,8 @@
+# large inputs and outputs: fetched or built by scripts/
+/src/
+/ref_8550/
+/stock/
+/out/
+/toolchain/
+/dist/
+*.img
