@@ -119,6 +119,26 @@ static bool op13_zygote_seen(void)
 	return seen;
 }
 
+/* init and the module loaders, whatever they wait in (an interruptible wait is not in the D list) */
+static void op13_show_boot_tasks(void)
+{
+	static const char * const names[] = { "init", "modprobe", "insmod", "k618", "ueventd" };
+	struct task_struct *g, *t;
+	unsigned int i;
+
+	pr_emerg("op13: init and the module loaders:\n");
+	rcu_read_lock();
+	for_each_process_thread(g, t) {
+		for (i = 0; i < ARRAY_SIZE(names); i++) {
+			if (!strncmp(t->comm, names[i], strlen(names[i]))) {
+				sched_show_task(t);
+				break;
+			}
+		}
+	}
+	rcu_read_unlock();
+}
+
 static void op13_deadline_fn(struct work_struct *work)
 {
 	if (op13_zygote_seen()) {
@@ -129,6 +149,7 @@ static void op13_deadline_fn(struct work_struct *work)
 	pr_emerg("op13: no zygote %u s into the boot: blocked tasks, CPUs, then a panic\n",
 		 op13_deadline);
 	show_state_filter(TASK_UNINTERRUPTIBLE);
+	op13_show_boot_tasks();
 	trigger_all_cpu_backtrace();
 	mdelay(500);
 	panic("op13: boot deadline (%u s) reached", op13_deadline);
