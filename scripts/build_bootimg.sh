@@ -20,6 +20,10 @@ ST=$ROOT/device/op13/stock
 REL=$(cat "$O/include/config/kernel.release")
 CMDLINE=${CMDLINE:-op13_modload_tolerate=1 printk.devkmsg=on log_buf_len=8M}
 [ -f "$O/Module.symvers" ] || { echo "build_bootimg: build the kernel first"; exit 1; }
+# an image without the SoC modules cannot get past the first stage: none at all, rather than one
+# that only looks testable
+[ -f "$S/Module.symvers" ] && [ "$(find "$S" -name '*.ko' | wc -l)" -ge 50 ] \
+	|| { echo "build_bootimg: the SoC modules are missing (see the SoC build): no image"; exit 1; }
 rm -rf "$B" && mkdir -p "$T/rd/lib/modules" "$T/mods/lib/modules/$REL/kernel" "$B/helpers"
 
 # the batch loader (a module) and its helper (a static program: the first-stage ramdisk has no libc)

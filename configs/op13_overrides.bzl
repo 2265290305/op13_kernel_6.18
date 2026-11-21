@@ -5,4 +5,7 @@ op13_overrides_config = {
     "CONFIG_SCHED_WALT": "n",
     # the OnePlus 13 loads qcom-cpufreq-hw in its first stage (sun_perf.bzl leaves it out)
     "CONFIG_ARM_QCOM_CPUFREQ_HW": "m",
+    # OnePlus' additions to minidump_log.c use the dynamic stack registration's definitions; canoe
+    # (what the reference builds) has it on, sun_perf.bzl off -- and 92 modules need minidump
+    "CONFIG_QCOM_DYN_MINIDUMP_STACK": "y",
 }
