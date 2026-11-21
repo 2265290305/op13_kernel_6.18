@@ -42,6 +42,19 @@ if ! grep -q 'k618: the handler of a domain' $IO; then
 	echo "vendor SMMU fault handler kept in the domain's vendor data"
 fi
 
+# op13_modload_tolerate=1 on the command line: a module that fails to load is logged and answered as
+# loaded. Android's first-stage init ends the boot at the first module it cannot insmod, and with
+# androidboot.load_modules_parallel (this phone's bootconfig) a tolerating module of its own could
+# not be guaranteed to load first; in the kernel it is there from the start.
+MM=$C/kernel/module/main.c
+if ! grep -q 'op13_modload_tolerate' $MM; then
+	perl -0pi -e 's#(SYSCALL_DEFINE3\(init_module, void __user \*, umod,\n)#/*\n * op13: op13_modload_tolerate=1 -- a failed load is reported and answered as loaded, so that a\n * bring-up boot gets past modules that do not load yet (tools/prep_common.sh)\n */\nstatic bool op13_modload_tolerate;\ncore_param(op13_modload_tolerate, op13_modload_tolerate, bool, 0644);\n\nstatic int op13_tolerate(int err, struct file *file)\n{\n\tif (err >= 0 \|\| err == -EEXIST \|\| !op13_modload_tolerate)\n\t\treturn err;\n\tif (file)\n\t\tpr_emerg("op13: %pD did not load (%d), answered as loaded\\n", file, err);\n\telse\n\t\tpr_emerg("op13: init_module did not load (%d), answered as loaded\\n", err);\n\treturn 0;\n}\n\n$1#' $MM
+	perl -0pi -e 's#\treturn load_module\(&info, uargs, 0\);\n\}\n\nstruct idempotent \{#\treturn op13_tolerate(load_module(&info, uargs, 0), NULL);\n}\n\nstruct idempotent {#' $MM
+	perl -0pi -e 's#\treturn idempotent_init_module\(fd_file\(f\), uargs, flags\);\n\}#\treturn op13_tolerate(idempotent_init_module(fd_file(f), uargs, flags), fd_file(f));\n}#' $MM
+	[ "$(grep -c 'op13_tolerate(' $MM)" = 3 ] || { echo "module load tolerance: edit failed"; exit 1; }
+	echo "module load tolerance (op13_modload_tolerate) added"
+fi
+
 # built-in initramfs (our module layer) unpacked after the bootloader's ramdisks, so it wins
 python3 -I - "$REF" "$C" <<'PY'
 import sys
