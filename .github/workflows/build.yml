@@ -58,6 +58,11 @@ jobs:
         continue-on-error: true
         run: bash scripts/build_tp.sh
 
+      - name: Build OnePlus boot modules
+        id: oplus
+        continue-on-error: true
+        run: bash scripts/build_oplus.sh
+
       - name: Boot image
         id: bootimg
         continue-on-error: true
@@ -82,6 +87,8 @@ jobs:
           cp src/soc/Module.symvers dist/soc/ 2>/dev/null || true
           mkdir -p dist/tp && cp out/tpmods/*.ko dist/tp/ 2>/dev/null || true
           cp -r out/tp-log dist/logs/ 2>/dev/null || true
+          mkdir -p dist/oplus && cp out/oplusmods/*.ko dist/oplus/ 2>/dev/null || true
+          cp -r out/oplus-log dist/logs/ 2>/dev/null || true
           cp out/*.log out/*.txt dist/logs/ 2>/dev/null || true
           cp out/soc-kconfig/.config dist/logs/soc.config 2>/dev/null || true
           cp out/boot/boot.img dist/ 2>/dev/null || true

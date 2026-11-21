@@ -39,7 +39,7 @@ chmod 755 "$T/rd/k618_umh"
 # modules_install (already stripped and signed), where no vendor module has the same name
 K=$T/mods/lib/modules/$REL/kernel
 SIGN() { "$O/scripts/sign-file" sha256 "$O/certs/signing_key.pem" "$O/certs/signing_key.x509" "$1"; }
-for f in $(find "$S" -name '*.ko') "$ROOT"/out/tpmods/*.ko "$B/helpers/k618_load.ko"; do
+for f in $(find "$S" -name '*.ko') "$ROOT"/out/tpmods/*.ko "$ROOT"/out/oplusmods/*.ko "$B/helpers/k618_load.ko"; do
 	[ -f "$f" ] || continue
 	llvm-strip --strip-debug -o "$K/$(basename "$f")" "$f"
 	SIGN "$K/$(basename "$f")"
