@@ -3,16 +3,22 @@
 (k618_tp_fix.py) that are not Xiaomi- or kalama-specific, applied the same way.
 
 The reference's list mixes 6.12 -> 6.18 build fixes with the Xiaomi 13 family's device work (its
-display extension, the 13 Ultra's camera, kalama's IPA layout, the 5.15 video/EVA copies). For the
-OnePlus 13 (sun) only the former apply: edits whose text names a Xiaomi model, mi_disp, kalama or
-the 5.15 copies are skipped, as are the generated Xiaomi display files. Idempotent."""
+display extension, the 13 Ultra's camera, kalama's IPA layout, the 5.15 video/EVA copies) and with
+adaptations to its ROM's 5.15-era user space (smcinvoke's 32-bit ABI, synx v1, display structs).
+For the OnePlus 13 (sun) only the build fixes apply: its 6.6-era user space speaks the 6.12
+release's smcinvoke ABI word for word (include/uapi/linux/smcinvoke.h is identical in OnePlus'
+SM8750 and SM8850 sources). So edits whose text names a Xiaomi model, mi_disp, kalama, the 5.15
+copies or 5.15 itself are skipped, as are the smcinvoke ABI headers' and the generated Xiaomi
+display files. Idempotent."""
 
 import os
 import re
 import sys
 
 DEVICE = re.compile(r"xiaomi|\bmi_|k618_mi|mi_disp|ultra|nuwa|ishtar|fuxi|kalama|madrid|panel_id"
-                    r"|-515|_515|k618_ois|k618_park", re.I)
+                    r"|-515|_515|k618_ois|k618_park|5\.15|5_15", re.I)
+# the smcinvoke ABI the reference narrowed to 5.15's (both copies of the header)
+SKIP_FILES = ("securemsm-kernel/include/uapi/linux/smcinvoke.h", "securemsm-kernel/include/linux/smcinvoke.h")
 SKIP_GENERATED = ("display-drivers/msm/mi_disp_k618.c", "display-drivers/msm/mi_disp_k618.h")
 SKIP_REPOS = ("video-driver-515", "eva-kernel-515")
 
@@ -50,7 +56,7 @@ def main(argv):
                     open(p, "w", encoding="utf-8", errors="surrogateescape", newline="").write(text.replace(old, new))
                     swept += 1
     for rel, old, new in ns["EDITS"]:
-        if rel.split("/")[0] in SKIP_REPOS or DEVICE.search(rel + old + new):
+        if rel.split("/")[0] in SKIP_REPOS or rel in SKIP_FILES or DEVICE.search(rel + old + new):
             skipped += 1
             continue
         path = os.path.join(root, rel)

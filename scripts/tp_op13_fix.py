@@ -21,6 +21,21 @@ EDITS = [
     ("display-drivers/msm/Kbuild",
      "\t\t\t\thdmi/hdmi_pll_snps.o \\\n",
      "\t\t\t\thdmi/hdmi_pll_snps.o \\\n\t\t\t\thdmi/hdmi_power.o \\\n\t\t\t\thdmi/hdmi_parser.o \\\n"),
+    # The OnePlus 13's composer (6.6-era, OnePlus' SM8750 sde_drm.h) passes sde_drm_scaler_v2
+    # without the eight fields the 6.12 release appends (edge_bleed_sup_en .. halo_suppress_coeff):
+    # read what it sends, the rest zero (off), not 32 bytes of whatever follows in its memory
+    ("display-drivers/msm/sde/sde_plane.c",
+     "\tif (copy_from_user(&scale_v2, usr, sizeof(scale_v2))) {\n",
+     "\t/* op13: the 6.6 composer's sde_drm_scaler_v2 ends before edge_bleed_sup_en */\n"
+     "\tmemset(&scale_v2, 0, sizeof(scale_v2));\n"
+     "\tif (copy_from_user(&scale_v2, usr, offsetof(struct sde_drm_scaler_v2, edge_bleed_sup_en))) {\n"),
+    ("display-drivers/msm/sde/sde_crtc.c",
+     "\t\t\tif (copy_from_user(&scaler_v2, scaler_v2_usr,\n"
+     "\t\t\t\t\tsizeof(scaler_v2))) {\n",
+     "\t\t\t/* op13: the 6.6 composer's sde_drm_scaler_v2 ends before edge_bleed_sup_en */\n"
+     "\t\t\tmemset(&scaler_v2, 0, sizeof(scaler_v2));\n"
+     "\t\t\tif (copy_from_user(&scaler_v2, scaler_v2_usr,\n"
+     "\t\t\t\t\toffsetof(struct sde_drm_scaler_v2, edge_bleed_sup_en))) {\n"),
 ]
 
 
