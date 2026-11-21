@@ -25,7 +25,7 @@ The stock device tree (in `vendor_boot`) stays in use, so the drivers have to ma
 
 ## Building
 
-Every push to `main` builds in GitHub Actions (Google's clang `r584948c`, ccache). Locally, on an x86_64 or arm64 Linux host:
+Every push to `main` builds in GitHub Actions (LLVM 19, ccache). Locally, on an x86_64 or arm64 Linux host:
 
 ```bash
 bash scripts/fetch.sh        # all sources at pinned revisions (src/, ref_8550/)
@@ -38,7 +38,7 @@ bash scripts/build_soc.sh    # SoC modules for sun -> src/soc/**/*.ko
 
 ## Testing
 
-Download `boot.img` from the latest successful run's artifact (`op13-618-<n>` on the [Actions](../../actions) page), then:
+Download `boot.img` from [Releases](../../releases) (or the latest successful run's artifact, `op13-618-<n>` on the [Actions](../../actions) page), then:
 
 ```bash
 adb reboot bootloader
