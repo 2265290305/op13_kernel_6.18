@@ -15,11 +15,18 @@
   modules.blocklist                     the phone's
 
 A module listed but missing ends first-stage init, so every list names only modules in the layer.
+EARLY modules go to the front of the first stage whatever list the phone has them in: the RAM
+console (pstore) the phone keeps across a reboot is set up by qcom_dynamic_ramoops, which the
+stock ROM loads only in its second stage -- a bring-up boot that dies in the first stage would
+leave nothing to read. pstore's console replays the log buffer when it registers.
 """
 
 import os
 import shutil
 import sys
+
+
+EARLY = ["qcom_dynamic_ramoops"]
 
 
 def canon(name):
@@ -45,6 +52,8 @@ def main(argv):
         k = canon(n)
         (first if k in have else missing_first).append(have.get(k, n))
     first = [m for m in first if canon(m) != "k618_load"]
+    early = [have[k] for k in EARLY if k in have]
+    first = early + [m for m in first if m not in early]
 
     # everything init loads for the first stage, dependencies included
     in_init, todo = set(), list(first)
