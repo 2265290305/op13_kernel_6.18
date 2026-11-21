@@ -2,7 +2,7 @@
 
 An Android common kernel **6.18** port for the **OnePlus 13** (Snapdragon 8 Elite, **SM8750** / `sun`), with the vendor modules rebuilt for 6.18.
 
-> **Status: work in progress — does not boot yet.** Only test with `fastboot boot` (see below); nothing here flashes your phone.
+> **Status: first test images — not booted on a phone yet.** Only test with `fastboot boot` (see below); nothing here flashes your phone.
 
 | | |
 |:--|:--|
@@ -17,9 +17,9 @@ A 6.6 kernel's vendor modules cannot load on 6.18, so the port is mostly about t
 
 1. **Kernel** — Google's ACK 6.18 with a small set of edits the vendor drivers need ([`tools/prep_common.sh`](tools/prep_common.sh)) and `gki_defconfig` plus a few options ([`tools/config_gki.sh`](tools/config_gki.sh)).
 2. **SoC drivers** — clocks, pinctrl, interconnects, RPMh, SMMU, UFS, USB, … from OnePlus' SM8850 (OnePlus 15) kernel tree, which already carries the SM8750 `sun` target. The 6.12 → 6.18 adaptation comes from the Xiaomi 13 port (see credits); the build uses the `sun_perf` config ([`scripts/build_soc.sh`](scripts/build_soc.sh), [`configs/op13_overrides.bzl`](configs/op13_overrides.bzl)).
-3. **Multimedia / connectivity drivers** (display, GPU, secure world, DSP, video, camera, audio, Wi-Fi, …) — Qualcomm techpack repos built for `sun`. *In progress.*
-4. **OnePlus drivers** (`oplus_*`) — from OnePlus' SM8750 sources, ported to 6.18. *In progress.*
-5. **Boot image** — the modules and their load lists are built into the kernel as an initramfs unpacked *after* the stock ramdisks, so they replace the 6.6 modules without touching `vendor_boot`, `init_boot` or `vendor_dlkm`. That is what lets a single `fastboot boot boot.img` test the whole thing. *In progress.*
+3. **Multimedia / connectivity drivers** — Qualcomm techpack repos built for `sun` ([`scripts/build_tp.sh`](scripts/build_tp.sh)): secure world (smcinvoke, qseecom, …), synx, fences, MMRM, DSP (fastrpc), display (`msm_drm`) and GPU (`msm_kgsl`). Only the reference port's generic 6.18 fixes are applied — not its adaptations to Xiaomi's 5.15-era user space: the OnePlus 13's user space speaks the 6.12 release's interfaces. *Video, camera, audio, Wi-Fi, Bluetooth: not yet.*
+4. **OnePlus drivers** — the boot modules (`oplusboot`, boot mode, project info, …) from OnePlus' SM8750 sources ([`scripts/build_oplus.sh`](scripts/build_oplus.sh)). *The other `oplus_*` modules (scheduler, storage, charger, …): not yet.*
+5. **Boot image** ([`scripts/build_bootimg.sh`](scripts/build_bootimg.sh)) — the modules and their load lists are built into the kernel as an initramfs unpacked *after* the stock ramdisks, so they replace the 6.6 modules without touching `vendor_boot`, `init_boot` or `vendor_dlkm`. That is what lets a single `fastboot boot boot.img` test the whole thing. First-stage init loads the phone's own first-stage order; the second stage's modules (USB, remoteproc, secure world, display, GPU, …) are loaded right after it, one child process each, by the reference's batch loader (the ramdisk is gone after `switch_root`). `op13_modload_tolerate=1` on the command line makes a module that fails to load a log line instead of the end of the boot.
 
 The stock device tree (in `vendor_boot`) stays in use, so the drivers have to match OnePlus' SM8750 bindings.
 
@@ -38,11 +38,23 @@ bash scripts/build_soc.sh    # SoC modules for sun -> src/soc/**/*.ko
 
 ## Testing
 
+Download `boot.img` from the latest successful run's artifact (`op13-618-<n>` on the [Actions](../../actions) page), then:
+
 ```bash
+adb reboot bootloader
 fastboot boot boot.img
 ```
 
-`fastboot boot` runs the image once from RAM; the next reboot is your installed kernel again. Keep root on the stock kernel so logs (`/sys/fs/pstore`) can be read after a failed attempt.
+`fastboot boot` runs the image once from RAM; the next reboot is your installed kernel again. **Never `fastboot flash` these images.**
+
+After a failed attempt, boot your normal system and save the previous boot's log (needs root on the stock kernel):
+
+```bash
+adb shell su -c 'cat /sys/fs/pstore/console-ramoops*' > console-ramoops.txt
+adb shell su -c 'ls -la /sys/fs/pstore'
+```
+
+`qcom_dynamic_ramoops` is the first module the image loads, so the log covers the first stage too. Look for `op13:` lines — modules that did not load.
 
 ## Credits
 

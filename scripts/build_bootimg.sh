@@ -64,6 +64,10 @@ cp "$K"/*.ko "$T/rd/lib/modules/"
 sed -e 's|kernel/|/lib/modules/|g' "$M/modules.dep" > "$T/rd/lib/modules/modules.dep"
 cp "$M/modules.alias" "$M/modules.softdep" "$M/modules.builtin" "$M/modules.builtin.modinfo" "$T/rd/lib/modules/"
 python3 -I "$ROOT/scripts/mklists.py" "$T/rd/lib/modules" "$ST" "$B"
+# every versioned import of every module against its provider (the kernel or another module of the
+# layer): one that differs is refused at load, so no image (the reference's k618_stage_crc.py)
+python3 -I "$REF/k618_stage_crc.py" "$O/Module.symvers" "$T/rd/lib/modules" | tail -12
+[ "${PIPESTATUS[0]}" = 0 ] || { echo "build_bootimg: symbol versions differ (above): no image"; exit 1; }
 
 # the layer, built into the kernel: INITRAMFS_SOURCE set and the Image relinked (INITRAMFS_FORCE
 # stays off, or the phone's own ramdisks would not be unpacked at all)
