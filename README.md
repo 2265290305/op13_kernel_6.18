@@ -2,7 +2,7 @@
 
 An Android common kernel **6.18** port for the **OnePlus 13** (Snapdragon 8 Elite, **SM8750** / `sun`), with the vendor modules rebuilt for 6.18.
 
-> **Status: first test images — not booted on a phone yet.** Only test with `fastboot boot` (see below); nothing here flashes your phone.
+> **Status: bring-up.** The kernel boots to Android's first-stage init; the full image does not reach Android yet (being debugged from its boot log). Only test with `fastboot boot` (see below); nothing here flashes your phone.
 
 | | |
 |:--|:--|
@@ -38,7 +38,7 @@ bash scripts/build_soc.sh    # SoC modules for sun -> src/soc/**/*.ko
 
 ## Testing
 
-Download `boot.img` from [Releases](../../releases) (or the latest successful run's artifact, `op13-618-<n>` on the [Actions](../../actions) page), then:
+Download from [Releases](../../releases) (or the latest successful run's artifact, `op13-618-<n>` on the [Actions](../../actions) page), then:
 
 ```bash
 adb reboot bootloader
@@ -47,14 +47,26 @@ fastboot boot boot.img
 
 `fastboot boot` runs the image once from RAM; the next reboot is your installed kernel again. **Never `fastboot flash` these images.**
 
-After a failed attempt, boot your normal system and save the previous boot's log (needs root on the stock kernel):
+| Image | What it is |
+|:--|:--|
+| `boot.img` | The port: 6.18 with our modules. |
+| `boot-rawlog.img` | The same, plus the reference's log writer (`k618_probe`), which also copies the kernel log onto the `rawdump` partition — for a boot whose RAM log does not survive the reset. It writes only to the partition whose partition-table name is `rawdump`, within its first 28 MB. |
+| `diag-nolayer.img` | The bare 6.18 kernel without our modules: it reaches first-stage init and reboots on its own after ~15 s. |
+
+A boot that has not started zygote after 3 minutes stops itself (`op13_deadline=180`): it logs where every blocked task and init wait, panics and restarts. The stock kernel keeps its log ([`tools/prep_common.sh`](tools/prep_common.sh) puts 6.18's ramoops where the stock kernel's is, `0x880000000`). Read it on the stock system (needs root), before rebooting again:
 
 ```bash
-adb shell su -c 'cat /sys/fs/pstore/console-ramoops*' > console-ramoops.txt
-adb shell su -c 'ls -la /sys/fs/pstore'
+adb shell su -c 'ls -la /sys/fs/pstore; cat /sys/fs/pstore/console-ramoops*' > log.txt
 ```
 
-`qcom_dynamic_ramoops` is the first module the image loads, so the log covers the first stage too. Look for `op13:` lines — modules that did not load.
+After `boot-rawlog.img`, also:
+
+```bash
+adb shell su -c 'dd if=/dev/block/by-name/rawdump bs=1M count=28' > rawdump.bin
+python3 ref_8550/kernel-6.18/k618_rdread.py rawdump.bin rawdump.txt
+```
+
+Look for `op13:` lines (modules that did not load, the deadline) and `k618_load:` lines (the second-stage batch, one line per module).
 
 ## Credits
 
