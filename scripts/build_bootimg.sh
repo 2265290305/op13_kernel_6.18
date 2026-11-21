@@ -26,12 +26,11 @@ REL=$(cat "$O/include/config/kernel.release")
 # not cached as the stock kernel maps it, so nothing is left in a cache at a reset), from the built-in
 # ramoops and the reservation tools/prep_common.sh adds -- the stock kernel shows it after the next boot
 RAMOOPS="op13_ramoops=0x240000@0x880000000 ramoops.mem_address=0x880000000 ramoops.mem_size=0x240000 ramoops.console_size=0x40000 ramoops.pmsg_size=0x200000 ramoops.record_size=0 ramoops.ftrace_size=0 ramoops.mem_type=0 ramoops.ecc=0"
-# No Qualcomm crash-dump mode on a panic (for this boot only: the mode is a flag the next boot sets
-# again): a restart, not the 900E dump mode with its black screen. No reboot=warm: the phone's
+# No reboot=warm: the phone's
 # firmware refuses an architectural SYSTEM_RESET2 ("Reboot failed -- System halted", test-15), and
 # its plain reset keeps the RAM (the log survived it). loglevel=7: the bootloader passes loglevel=6,
 # which keeps KERN_INFO -- most of the log -- off the consoles, ramoops' among them.
-RAMOOPS="$RAMOOPS qcom_dload_mode.download_mode=0 loglevel=7"
+RAMOOPS="$RAMOOPS loglevel=7"
 BASE="printk.devkmsg=on log_buf_len=16M sysctl.kernel.panic_on_oops=0 sysctl.kernel.printk=1 panic=5 initcall_blacklist=qcom_geni_serial_init android_arch_task_struct_size=1024 sched_proxy_exec=0 erofs.reserved_pages=64 restrict_cma_redirect=false sysctl.kernel.sched_util_clamp_min_rt_default=0 $RAMOOPS"
 # the full image: modules that do not load are logged, and no zygote after 3 minutes ends the boot
 # with the blocked tasks in the log (tools/prep_common.sh, op13_deadline)
@@ -61,6 +60,12 @@ for f in $(find "$S" -name '*.ko') "$ROOT"/out/tpmods/*.ko "$ROOT"/out/oplusmods
 	llvm-strip --strip-debug -o "$K/$(basename "$f")" "$f"
 	SIGN "$K/$(basename "$f")"
 done
+# Left out of the boot: qcom-dload-mode (Qualcomm's crash-dump switch). With it loaded, the phone's
+# resets go through the crash-dump path and the RAM -- the ramoops log with it -- does not survive
+# them (test-15: the same forced reset kept the log of the image without our modules and lost the
+# full image's); its download_mode=0 even turns dump mode on until it probes. Without it the
+# bootloader's own setting stands, as in the image without modules. Nothing depends on it.
+for d in qcom-dload-mode; do rm -f "$K/$d.ko"; done
 vendor_n=$(ls "$K" | wc -l)
 canon() { basename "$1" .ko | tr '-' '_'; }
 declare -A HAVE
