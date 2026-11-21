@@ -60,6 +60,11 @@ jobs:
         continue-on-error: true
         run: bash scripts/build_soc.sh
 
+      - name: Build techpack modules (sun)
+        id: tp
+        continue-on-error: true
+        run: bash scripts/build_tp.sh
+
       - name: Save ccache
         if: always()
         uses: actions/cache/save@v4
@@ -77,9 +82,11 @@ jobs:
           [ -d out/gki-staging ] && cp -r out/gki-staging dist/gki/ || true
           find src/soc -name '*.ko' -exec cp {} dist/soc/ \; 2>/dev/null || true
           cp src/soc/Module.symvers dist/soc/ 2>/dev/null || true
+          mkdir -p dist/tp && cp out/tpmods/*.ko dist/tp/ 2>/dev/null || true
+          cp -r out/tp-log dist/logs/ 2>/dev/null || true
           cp out/*.log out/*.txt dist/logs/ 2>/dev/null || true
           cp out/soc-kconfig/.config dist/logs/soc.config 2>/dev/null || true
-          echo "soc modules: $(ls dist/soc/*.ko 2>/dev/null | wc -l)"
+          echo "soc modules: $(ls dist/soc/*.ko 2>/dev/null | wc -l), techpack modules: $(ls dist/tp/*.ko 2>/dev/null | wc -l)"
           du -sh dist/*
 
       - uses: actions/upload-artifact@v4
