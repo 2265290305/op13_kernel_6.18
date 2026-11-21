@@ -33,14 +33,22 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq bc bison flex libssl-dev libelf-dev cpio lz4 zstd ccache kmod python3
 
-      - name: Toolchain cache
-        uses: actions/cache@v4
+      - name: Restore toolchain
+        id: clang
+        uses: actions/cache/restore@v4
         with:
           path: toolchain/clang-r584948c
           key: clang-r584948c-4a7d0a5e
 
       - name: Toolchain
         run: bash scripts/get_clang.sh
+
+      - name: Save toolchain
+        if: steps.clang.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: toolchain/clang-r584948c
+          key: clang-r584948c-4a7d0a5e
 
       - name: Sources
         run: bash scripts/fetch.sh
