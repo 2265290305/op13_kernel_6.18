@@ -21,4 +21,5 @@ fi
 export PATH
 export KBUILD_BUILD_HOST=build-host KBUILD_BUILD_USER=build-user KBUILD_BUILD_VERSION=1
 export KBUILD_BUILD_TIMESTAMP="Sat Nov 21 00:00:00 UTC 2026"
-KMAKE=(make -C "$C" O="$O" ARCH=arm64 LLVM=1 LLVM_IAS=1)
+# LOCALVERSION= (set, empty): the release is 6.18.<n> + CONFIG_LOCALVERSION, nothing appended
+KMAKE=(make -C "$C" O="$O" ARCH=arm64 LLVM=1 LLVM_IAS=1 LOCALVERSION=)

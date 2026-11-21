@@ -13,5 +13,9 @@ start=$(date +%s)
 }
 rm -rf "$ROOT/out/gki-staging"
 "${KMAKE[@]}" INSTALL_MOD_PATH="$ROOT/out/gki-staging" INSTALL_MOD_STRIP=1 modules_install > /dev/null
+# the build/ and source/ links lead back into the tree (the artifact upload would follow them)
+rm -f "$ROOT"/out/gki-staging/lib/modules/*/build "$ROOT"/out/gki-staging/lib/modules/*/source
+grep -qE '^6\.18\.[0-9]+-palaziks\.ShiftPorts$' "$O/include/config/kernel.release" \
+	|| { echo "build_gki: kernel release is $(cat "$O/include/config/kernel.release")"; exit 1; }
 echo "build_gki: built in $(( $(date +%s) - start )) s: $(cat "$O/include/config/kernel.release"), \
 $(find "$ROOT/out/gki-staging" -name '*.ko' | wc -l) modules, $(grep -c ' warning: ' "$ROOT/out/gki-build.log") warnings"
