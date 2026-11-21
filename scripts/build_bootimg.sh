@@ -55,12 +55,14 @@ while read -r f; do
 done < <(find "$ROOT/out/gki-staging" -name '*.ko')
 echo "build_bootimg: $vendor_n vendor modules, $gki_n of the kernel's own"
 
+# the kernel's built-in module lists: modprobe takes a dependency on a built-in driver as met
+cp "$O/modules.builtin" "$O/modules.builtin.modinfo" "$T/mods/lib/modules/$REL/"
 depmod -b "$T/mods" -F "$O/System.map" -e "$REL" 2> "$B/depmod.err" || true
 grep -v 'could not open modules.\(builtin\|order\)' "$B/depmod.err" | head -20 || true
 M=$T/mods/lib/modules/$REL
 cp "$K"/*.ko "$T/rd/lib/modules/"
 sed -e 's|kernel/|/lib/modules/|g' "$M/modules.dep" > "$T/rd/lib/modules/modules.dep"
-cp "$M/modules.alias" "$M/modules.softdep" "$T/rd/lib/modules/"
+cp "$M/modules.alias" "$M/modules.softdep" "$M/modules.builtin" "$M/modules.builtin.modinfo" "$T/rd/lib/modules/"
 python3 -I "$ROOT/scripts/mklists.py" "$T/rd/lib/modules" "$ST" "$B"
 
 # the layer, built into the kernel: INITRAMFS_SOURCE set and the Image relinked (INITRAMFS_FORCE

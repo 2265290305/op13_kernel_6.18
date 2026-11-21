@@ -15,11 +15,12 @@ EDITS = [
      "static void kgsl_shmem_fill_page(",
      "#if (KERNEL_VERSION(6, 12, 18) <= LINUX_VERSION_CODE)\n"
      "static void kgsl_shmem_fill_page("),
-    # display_modules.bzl lists msm/hdmi/hdmi_power.c among the HDMI sources (sun's conf has HDMI
-    # on), the Kbuild does not (modpost: hdmi_power_put undefined)
+    # display_modules.bzl lists msm/hdmi/hdmi_power.c and hdmi_parser.c among the HDMI sources
+    # (sun's conf has HDMI on), the Kbuild does not (modpost: hdmi_power_put, hdmi_parser_put
+    # undefined). The only other .bzl sources it lacks are behind options sun leaves off.
     ("display-drivers/msm/Kbuild",
      "\t\t\t\thdmi/hdmi_pll_snps.o \\\n",
-     "\t\t\t\thdmi/hdmi_pll_snps.o \\\n\t\t\t\thdmi/hdmi_power.o \\\n"),
+     "\t\t\t\thdmi/hdmi_pll_snps.o \\\n\t\t\t\thdmi/hdmi_power.o \\\n\t\t\t\thdmi/hdmi_parser.o \\\n"),
 ]
 
 
