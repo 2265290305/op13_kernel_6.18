@@ -15,7 +15,7 @@ OUTM=$ROOT/out/tpmods
 LOG=$ROOT/out/tp-log
 [ -f "$S/Module.symvers" ] && [ -f "$S/gen/autoconf_vendor.h" ] || { echo "build_tp: build the SoC modules first"; exit 1; }
 
-REPOS_ALL="securemsm-kernel synx-kernel mm-drivers mmrm-driver dsp-kernel display-drivers graphics-kernel video-driver"
+REPOS_ALL="securemsm-kernel synx-kernel mm-drivers mmrm-driver dsp-kernel display-drivers graphics-kernel"
 mkdir -p "$TP" "$OUTM" "$LOG"
 for t in $REPOS_ALL; do
 	rsync -a --delete "$SRC/$t/" "$TP/$t/"
@@ -26,6 +26,7 @@ done
 grep -rlZ '\.\./\.\./\.\./\.\./vendor/qcom/opensource' "$TP" | xargs -0 -r \
 	sed -i 's#\.\./\.\./\.\./\.\./vendor/qcom/opensource#../../../vendor/qcom/opensource#g'
 python3 -I "$ROOT/scripts/tp_fix.py" "$REF" "$TP"
+python3 -I "$ROOT/scripts/tp_op13_fix.py" "$TP"
 for d in "$TP"/*; do
 	python3 -I "$REF/k618_fix618.py" "$d" | grep -v 'k618_fix618: 0 files changed' | sed "s|^|$(basename "$d"): |" || true
 done
@@ -50,7 +51,8 @@ MMINC="%T/synx-kernel/msm/synx %T/synx-kernel/include %T/synx-kernel/include/uap
        %T/synx-kernel/include/uapi/synx/media %T/mm-drivers/hw_fence/include
        %T/mm-drivers/hfi_core/inc %T/mm-drivers/msm_ext_display/include
        %T/mm-drivers/sync_fence/include %T/securemsm-kernel/hdcp
-       %T/securemsm-kernel/include %T/securemsm-kernel/include/linux %T/dsp-kernel/include"
+       %T/securemsm-kernel %T/securemsm-kernel/include %T/securemsm-kernel/include/linux
+       %T/dsp-kernel/include"
 
 # name | directory (M=) | make variables | extra include dirs | extra flags
 REPOS=(
@@ -64,7 +66,8 @@ REPOS=(
 	"hfi_core|mm-drivers/hfi_core|MSM_HFI_CORE_ROOT=%P/|%M|"
 	"display|display-drivers|DISPLAY_ROOT=%D CONFIG_DRM_MSM=m|%M|-include %T/k618_oplus_stub.h"
 	"graphics|graphics-kernel|KGSL_PATH=%D $GPUVARS CONFIG_ARM_SMMU=y|%M %C/drivers/devfreq|-include %T/graphics-kernel/gki_sun_gpuconf.h -DCONFIG_ARM_SMMU=1"
-	"video|video-driver|VIDEO_ROOT=%D CONFIG_MSM_VIDC_ANDROID=m|%M|"
+	# video: this release has no sun platform sources (driver/platform/sun) -- they are in the
+	# OnePlus 13's own 6.6 tree; left out until they are brought over (not needed to boot)
 )
 
 # The vendor configuration as the techpacks see it: the SoC build's evaluated options, less the
@@ -95,7 +98,7 @@ for entry in "${REPOS[@]}"; do
 	# CONFIG_ARCH_SUN: the chipset each Kbuild keys its configuration off. NOSTDINC_FLAGS puts the
 	# SoC tree's headers before the kernel's own, as the SoC build itself does
 	# shellcheck disable=SC2086
-	"${KMAKE[@]}" M="$D" modules -j"$J" KERNEL_SRC="$C" KERNEL_ROOT="$C" \
+	"${KMAKE[@]}" M="$D" modules -k -j"$J" KERNEL_SRC="$C" KERNEL_ROOT="$C" \
 		CONFIG_ARCH_SUN=y KBUILD_EXTRA_SYMBOLS="$SYMS" \
 		NOSTDINC_FLAGS="-nostdinc -I$S/include -I$S/include/uapi$EI" \
 		KCFLAGS="-Wno-error -include $TPCONF $defs" $vars > "$LOG/$name.log" 2>&1
@@ -106,7 +109,7 @@ for entry in "${REPOS[@]}"; do
 	if [ $rc -ne 0 ]; then
 		bad=$((bad + 1)); failed="$failed $name"
 		grep -E ': (fatal )?error: |^ERROR: modpost|No rule to make target' "$LOG/$name.log" \
-			| sed -E "s|$TP/||" | awk -F: '!seen[$1$2]++' | head -12 || true
+			| sed -E "s|$TP/||" | awk -F: '!seen[$1$2]++' | head -40 || true
 		continue
 	fi
 	ok=$((ok + 1))
