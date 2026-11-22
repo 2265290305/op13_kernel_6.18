@@ -1,6 +1,6 @@
 #!/bin/bash
 # build_oplus.sh: the OnePlus 13's own first-stage boot modules (OnePlus' SM8750 sources,
-# src/mods8750/vendor/oplus/kernel/boot), as external modules against out/gki and the SoC build:
+# src/mods8750/vendor/oplus/kernel/boot, and the modem feature module), as external modules against out/gki and the SoC build:
 # boot parameter parsing (oplusboot, ftm mode, charger present, build variant, CDT), boot mode,
 # project info (/proc/oplusVersion) and the bootloader log. Each group copied into out/oplus and
 # built there; modules collected in out/oplusmods, a log per group in out/oplus-log.
@@ -23,12 +23,17 @@ SETS=(
 	# the stock module reports SM8750 / QCOM
 	"projectinfo|oplus_projectinfo|CONFIG_OPLUS_SYSTEM_KERNEL_QCOM=y CONFIG_OPLUS_FEATURE_OPROJECT=m OPLUS_VND_BUILD_PLATFORM=SM8750 OPLUS_VND_BUILD_CHIPSET_COMPANY=QCOM|-DCONFIG_OPLUS_SYSTEM_KERNEL_QCOM=1"
 	"bootloader_log|bootloader_log|CONFIG_OPLUS_FEATURE_BOOTLOADER_LOG=m"
+	# /proc/oplusManifest/network_manifest, the link /odm/etc/vintf/manifest/network_manifest.xml
+	# points to: without it servicemanager has no device manifest and no HAL can register (test-21).
+	# The stock module is built with CONFIG_OPLUS_SYSTEM_KERNEL_QCOM (smem) and without SIMCARDNUM.
+	"mdmfeature|$ROOT/src/mods8750/vendor/oplus/hardware/radio/kernel/mdmfeature|CONFIG_OPLUS_FEATURE_MDMFEATURE=m|-DCONFIG_OPLUS_SYSTEM_KERNEL_QCOM=1 -I$W/mdmfeature"
 )
 SYMS=$S/Module.symvers
 ok=0; bad=0
 for entry in "${SETS[@]}"; do
 	IFS='|' read -r name dir vars defs <<< "$entry"
-	cp -r "$SRC/$dir" "$W/$name"
+	case $dir in /*) ;; *) dir=$SRC/$dir ;; esac	# a group outside kernel/boot by its full path
+	cp -r "$dir" "$W/$name"
 	# the reference's 6.12 -> 6.18 API sweeps, then this port's own edits
 	python3 -I "$REF/k618_fix618.py" "$W/$name" | grep -v 'k618_fix618: 0 files changed' || true
 	python3 -I "$ROOT/scripts/oplus_fix.py" "$W/$name"
