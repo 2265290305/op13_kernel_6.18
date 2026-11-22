@@ -88,10 +88,9 @@ EOF
 	echo "op13_ramoops= reservation added"
 fi
 
-# op13_deadline=<seconds>: a boot that has not started zygote by then is stopped -- where every
-# blocked task waits, every CPU's stack, then a panic -- so that a hung bring-up boot ends in a
-# (warm, with reboot=warm) restart that keeps its log in ramoops, instead of in a forced reset that
-# loses it. Once zygote has run, it does nothing.
+# op13_deadline=<seconds>: a boot that has not started zygote by then logs where every blocked task
+# waits and every CPU's stack, for the ramoops log a Power+VolUp reset keeps. Once zygote has run,
+# it does nothing.
 PA=$C/kernel/panic.c
 if ! grep -q 'op13_deadline' $PA; then
 	cat >> $PA <<'EOF'
@@ -146,13 +145,14 @@ static void op13_deadline_fn(struct work_struct *work)
 		return;
 	}
 	console_verbose();	/* the task dump is KERN_INFO: past the bootloader's loglevel */
-	pr_emerg("op13: no zygote %u s into the boot: blocked tasks, CPUs, then a panic\n",
+	pr_emerg("op13: no zygote %u s into the boot: blocked tasks and CPUs follow\n",
 		 op13_deadline);
 	show_state_filter(TASK_UNINTERRUPTIBLE);
 	op13_show_boot_tasks();
 	trigger_all_cpu_backtrace();
-	mdelay(500);
-	panic("op13: boot deadline (%u s) reached", op13_deadline);
+	/* no panic: it stops the CPUs, the unfed watchdog then resets the phone and the log is lost
+	 * (test-24); left running, a Power+VolUp reset keeps it (test-21) */
+	pr_emerg("op13: boot deadline (%u s) reached: reset with Power+VolUp\n", op13_deadline);
 }
 static DECLARE_DELAYED_WORK(op13_deadline_work, op13_deadline_fn);
 
@@ -168,7 +168,7 @@ EOF
 	echo "op13_deadline= boot deadline added"
 fi
 
-# op13_hold_reboot=1: a restart is held -- logged, then the CPUs halted -- instead of done. The
+# op13_hold_reboot=1: a restart is held -- logged, and the task that asked sleeps for good -- instead of done. The
 # phone's own restart is a cold one that loses the RAM log, a Power+VolUp reset keeps it (test-15),
 # and a bring-up boot that gives up restarts on its own (test-23: into recovery after ~15 s): held,
 # its log is still in ramoops after the button reset. What userspace asked for (a recovery boot, its
@@ -181,6 +181,7 @@ p = sys.argv[1]
 s = open(p).read()
 hold = '''/* op13: see tools/prep_common.sh */
 #include <linux/moduleparam.h>
+#include <linux/sched.h>
 static bool op13_hold_reboot;
 core_param(op13_hold_reboot, op13_hold_reboot, bool, 0644);
 
@@ -189,8 +190,11 @@ static void op13_hold(const char *cmd)
 	pr_emerg("op13: restart%s%s held (op13_hold_reboot): reset with Power+VolUp\\n",
 		 cmd ? " with command " : "", cmd ? cmd : "");
 	dump_stack();
-	kmsg_dump(KMSG_DUMP_SHUTDOWN);
-	machine_halt();
+	/* the caller sleeps, the rest keeps running: halted CPUs leave the watchdog unfed, and its
+	 * reset loses the log as the phone's own restart does (test-24). TASK_IDLE: no wakeup by a
+	 * signal (init gets SIGCHLD), not a hung task either */
+	for (;;)
+		schedule_timeout_idle(60 * HZ);
 }
 
 '''
