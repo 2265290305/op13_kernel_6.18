@@ -17,6 +17,15 @@ FROM_KERNEL = [
 EDITS = [
     # nr_irqs is no longer exported in 6.18; irq_get_nr_irqs() is
     ("drivers/soc/qcom/gic_intr_routing.c", "i < nr_irqs;", "i < irq_get_nr_irqs();"),
+    # the reference's key-manager step before the first wrapped key (ice.c, k618_ice_hwkm_setup) is
+    # its 5.15 kalama driver's: the OnePlus 13's own qcom_ice and tmecom-intf have no such step
+    # (tmecom-intf exports only tmecom_process_request / tmelog_process_request). On sun it blocked
+    # every key (test-25, without tmecom-intf) and hung vold's first one (test-26, with it). Off,
+    # with qcom_ice.k618_tpkey=1 to bring it back
+    ("drivers/soc/qcom/ice.c",
+     "static int k618_ice_hwkm_setup(struct qcom_ice *ice)\n{\n",
+     "static bool k618_tpkey;\nmodule_param(k618_tpkey, bool, 0444);\n\n"
+     "static int k618_ice_hwkm_setup(struct qcom_ice *ice)\n{\n\tif (!k618_tpkey)\n\t\treturn 0;\t/* op13: scripts/soc_fix.py */\n"),
 ]
 
 

@@ -54,6 +54,36 @@ if ! grep -q 'op13_modload_tolerate' $MM; then
 	[ "$(grep -c 'op13_tolerate(' $MM)" = 3 ] || { echo "module load tolerance: edit failed"; exit 1; }
 	echo "module load tolerance (op13_modload_tolerate) added"
 fi
+# A module built for another kernel (the phone's 6.6 vendor_dlkm ones, which Android's second stage
+# tries again for every device) is named the first 20 times, then counted: 1,700 such lines pushed
+# the first 2.7 s of test-26's boot out of the 256 KB ramoops log. Ours are built against this
+# kernel (the CRC check in build_bootimg.sh), so this message is never about one of them.
+if ! grep -q 'op13_foreign_modules' $MM; then
+	python3 -I - "$MM" <<'PY'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+old = '''	if (shdr->sh_size != sizeof(struct module)) {
+		pr_err("module %s: .gnu.linkonce.this_module section size must match the kernel's built struct module size at run time\\n",
+		       info->name ?: "(missing .modinfo section or name field)");
+		return -ENOEXEC;
+	}'''
+new = '''	if (shdr->sh_size != sizeof(struct module)) {
+		static atomic_t op13_foreign_modules;	/* op13: tools/prep_common.sh */
+		int n = atomic_inc_return(&op13_foreign_modules);
+
+		if (n <= 20 || !(n % 500))
+			pr_err("module %s: .gnu.linkonce.this_module section size must match the kernel's built struct module size at run time (%d so far%s)\\n",
+			       info->name ?: "(missing .modinfo section or name field)", n,
+			       n == 20 ? ", next ones counted only" : "");
+		return -ENOEXEC;
+	}'''
+assert s.count(old) == 1, "struct module size check"
+open(p, "w").write(s.replace(old, new))
+PY
+	grep -q 'op13_foreign_modules' $MM || { echo "foreign module message: edit failed"; exit 1; }
+	echo "foreign module message capped"
+fi
 
 # op13_ramoops=<size>@<address>: that RAM kept out of the kernel's hands from the start, for the
 # built-in ramoops (ramoops.mem_address= etc. on the command line). The stock 6.6 kernel's ramoops
