@@ -33,8 +33,10 @@ RAMOOPS="op13_ramoops=0x240000@0x880000000 ramoops.mem_address=0x880000000 ramoo
 RAMOOPS="$RAMOOPS loglevel=7"
 BASE="printk.devkmsg=on log_buf_len=16M sysctl.kernel.panic_on_oops=0 sysctl.kernel.printk=1 panic=5 initcall_blacklist=qcom_geni_serial_init android_arch_task_struct_size=1024 sched_proxy_exec=0 erofs.reserved_pages=64 restrict_cma_redirect=false sysctl.kernel.sched_util_clamp_min_rt_default=0 $RAMOOPS"
 # the full image: modules that do not load are logged, and no zygote after 3 minutes ends the boot
-# with the blocked tasks in the log (tools/prep_common.sh, op13_deadline)
-CMDLINE=${CMDLINE:-op13_modload_tolerate=1 op13_deadline=180 $BASE}
+# with the blocked tasks in the log (tools/prep_common.sh, op13_deadline). panic=0 (after BASE's
+# panic=5, so it wins): the kernel stops there instead of restarting -- the phone's own restart is a
+# cold one that loses the RAM log (test-13, test-21), a button reset keeps it (test-15)
+CMDLINE=${CMDLINE:-op13_modload_tolerate=1 op13_deadline=180 $BASE panic=0}
 [ -f "$O/Module.symvers" ] || { echo "build_bootimg: build the kernel first"; exit 1; }
 # an image without the SoC modules cannot get past the first stage: none at all, rather than one
 # that only looks testable
