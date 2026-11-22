@@ -71,6 +71,11 @@ done
 # full image's); its download_mode=0 even turns dump mode on until it probes. Without it the
 # bootloader's own setting stands, as in the image without modules. Nothing depends on it.
 for d in qcom-dload-mode; do rm -f "$K/$d.ko"; done
+# modules the boot cannot do without: a techpack that failed to link leaves them out without stopping
+# its build (test-26 lost securemsm and msm_drm that way, and with them KeyMint and the display)
+for m in smcinvoke_dlkm qseecom_dlkm si_core_module mem_object msm_drm msm_kgsl qcom_ice ufshcd-crypto-qti oplus_mdmfeature; do
+	[ -f "$K/$m.ko" ] || { echo "build_bootimg: $m.ko is missing (see its build log): no image"; exit 1; }
+done
 vendor_n=$(ls "$K" | wc -l)
 canon() { basename "$1" .ko | tr '-' '_'; }
 declare -A HAVE

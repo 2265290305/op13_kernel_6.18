@@ -8,8 +8,8 @@ op13_overrides_config = {
     # OnePlus' additions to minidump_log.c use the dynamic stack registration's definitions; canoe
     # (what the reference builds) has it on, sun_perf.bzl off -- and 92 modules need minidump
     "CONFIG_QCOM_DYN_MINIDUMP_STACK": "y",
-    # tmecom-intf (vendor_dlkm on the phone): the key manager's mailbox client. ICE asks it for the
-    # transport key before the first wrapped key; without it every key programming fails with
-    # -EPROBE_DEFER and /data does not mount (test-25: init_user0_failed). sun_perf.bzl leaves it out
-    "CONFIG_MSM_TMECOM_QMP": "m",
+    # NOT CONFIG_MSM_TMECOM_QMP: that tmecom-intf is the reference's copy of Xiaomi's 5.15 one, for
+    # its SM8550 ICE step (off on sun, scripts/soc_fix.py). On, it also reaches the techpacks'
+    # configuration, where tz_log then wants tmelog_process_request, which only securemsm's own
+    # tmecom has: securemsm and with it msm_drm failed to link (test-26 had neither)
 }
