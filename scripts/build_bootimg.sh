@@ -36,7 +36,9 @@ BASE="printk.devkmsg=on log_buf_len=16M sysctl.kernel.panic_on_oops=0 sysctl.ker
 # with the blocked tasks in the log (tools/prep_common.sh, op13_deadline). panic=0 (after BASE's
 # panic=5, so it wins): the kernel stops there instead of restarting -- the phone's own restart is a
 # cold one that loses the RAM log (test-13, test-21), a button reset keeps it (test-15)
-CMDLINE=${CMDLINE:-op13_modload_tolerate=1 op13_deadline=180 $BASE panic=0}
+# op13_hold_reboot=1: so does a restart userspace asks for (test-23 went to recovery after ~15 s):
+# held, with its log kept for the button reset (tools/prep_common.sh)
+CMDLINE=${CMDLINE:-op13_modload_tolerate=1 op13_deadline=180 op13_hold_reboot=1 $BASE panic=0}
 [ -f "$O/Module.symvers" ] || { echo "build_bootimg: build the kernel first"; exit 1; }
 # an image without the SoC modules cannot get past the first stage: none at all, rather than one
 # that only looks testable

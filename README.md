@@ -53,7 +53,7 @@ fastboot boot boot.img
 | `boot-rawlog.img` | The same, plus the reference's log writer (`k618_probe`), which also copies the kernel log onto the `rawdump` partition — for a boot whose RAM log does not survive the reset. It writes only to the partition whose partition-table name is `rawdump`, within its first 28 MB. |
 | `diag-nolayer.img` | The bare 6.18 kernel without our modules: it reaches first-stage init and reboots on its own after ~15 s. |
 
-A boot that has not started zygote after 3 minutes stops itself (`op13_deadline=180`): it logs where every blocked task and init wait, panics and restarts. The stock kernel keeps its log ([`tools/prep_common.sh`](tools/prep_common.sh) puts 6.18's ramoops where the stock kernel's is, `0x880000000`). Read it on the stock system (needs root), before rebooting again:
+A boot that has not started zygote after 3 minutes stops itself (`op13_deadline=180`): it logs where every blocked task and init waits, and panics. Neither a panic nor a restart that Android asks for (`op13_hold_reboot=1`) restarts the phone: it stays on the screen it was on, and **you reset it with Power+VolUp** (10–15 s) — the phone's own restart would lose the log, the button reset keeps it. The stock kernel keeps its log ([`tools/prep_common.sh`](tools/prep_common.sh) puts 6.18's ramoops where the stock kernel's is, `0x880000000`). Read it on the stock system (needs root), before rebooting again:
 
 ```bash
 adb shell su -c 'ls -la /sys/fs/pstore; cat /sys/fs/pstore/console-ramoops*' > log.txt
