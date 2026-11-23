@@ -69,7 +69,7 @@ chmod 755 "$T/rd/k618_umh"
 # modules_install (already stripped and signed), where no vendor module has the same name
 K=$T/mods/lib/modules/$REL/kernel
 SIGN() { "$O/scripts/sign-file" sha256 "$O/certs/signing_key.pem" "$O/certs/signing_key.x509" "$1"; }
-for f in $(find "$S" -name '*.ko') "$ROOT"/out/tpmods/*.ko "$ROOT"/out/oplusmods/*.ko "$ROOT"/out/extramods/*.ko "$B"/helpers/*.ko; do
+for f in $(find "$S" -name '*.ko') "$ROOT"/out/tpmods/*.ko "$ROOT"/out/oplusmods/*.ko "$ROOT"/out/extramods/*.ko "$ROOT"/out/vendormods/*.ko "$B"/helpers/*.ko; do
 	[ -f "$f" ] || continue
 	llvm-strip --strip-debug -o "$K/$(basename "$f")" "$f"
 	SIGN "$K/$(basename "$f")"
@@ -98,17 +98,46 @@ echo "build_bootimg: $vendor_n vendor modules, $gki_n of the kernel's own"
 
 # the kernel's built-in module lists: modprobe takes a dependency on a built-in driver as met
 cp "$O/modules.builtin" "$O/modules.builtin.modinfo" "$T/mods/lib/modules/$REL/"
-depmod -b "$T/mods" -F "$O/System.map" -e "$REL" 2> "$B/depmod.err" || true
-grep -v 'could not open modules.\(builtin\|order\)' "$B/depmod.err" | head -20 || true
-M=$T/mods/lib/modules/$REL
-cp "$K"/*.ko "$T/rd/lib/modules/"
-sed -e 's|kernel/|/lib/modules/|g' "$M/modules.dep" > "$T/rd/lib/modules/modules.dep"
-cp "$M/modules.alias" "$M/modules.softdep" "$M/modules.builtin" "$M/modules.builtin.modinfo" "$T/rd/lib/modules/"
-python3 -I "$ROOT/scripts/mklists.py" "$T/rd/lib/modules" "$ST" "$B"
-# every versioned import of every module against its provider (the kernel or another module of the
-# layer): one that differs is refused at load, so no image (the reference's k618_stage_crc.py)
-python3 -I "$REF/k618_stage_crc.py" "$O/Module.symvers" "$T/rd/lib/modules" | tail -12
-[ "${PIPESTATUS[0]}" = 0 ] || { echo "build_bootimg: symbol versions differ (above): no image"; exit 1; }
+# the drivers scripts/build_vendor.sh brought over (mklists.py loads them last); one whose symbol
+# versions differ is left out with what needs it, instead of costing the image (below)
+NEW=$B/vendormods.list
+cp "$ROOT/out/vendormods.list" "$NEW" 2>/dev/null || : > "$NEW"
+for try in 1 2 3 4; do
+	rm -rf "$T/rd/lib/modules" && mkdir -p "$T/rd/lib/modules"
+	depmod -b "$T/mods" -F "$O/System.map" -e "$REL" 2> "$B/depmod.err" || true
+	grep -v 'could not open modules.\(builtin\|order\)' "$B/depmod.err" | head -20 || true
+	M=$T/mods/lib/modules/$REL
+	cp "$K"/*.ko "$T/rd/lib/modules/"
+	sed -e 's|kernel/|/lib/modules/|g' "$M/modules.dep" > "$T/rd/lib/modules/modules.dep"
+	cp "$M/modules.alias" "$M/modules.softdep" "$M/modules.builtin" "$M/modules.builtin.modinfo" "$T/rd/lib/modules/"
+	# boot.img: the new drivers in the layer, loaded by nothing (boot-full.img loads them, below)
+	python3 -I "$ROOT/scripts/mklists.py" "$T/rd/lib/modules" "$ST" "$B" "$NEW" hold
+	# every versioned import of every module against its provider (the kernel or another module of the
+	# layer): one that differs is refused at load, so no image (the reference's k618_stage_crc.py)
+	set +e
+	python3 -I "$REF/k618_stage_crc.py" "$O/Module.symvers" "$T/rd/lib/modules" > "$B/crc.txt"
+	rc=$?
+	set -e
+	tail -12 "$B/crc.txt"
+	[ $rc = 0 ] && break
+	# only new drivers may go: anything else that differs stops the image as before
+	bad=$(grep -v '^k618_stage_crc:' "$B/crc.txt" | grep -oE '^[^ :]+:' | tr -d ':' | sort -u)
+	drop=
+	for m in $bad; do
+		grep -qx "$m" "$NEW" || { echo "build_bootimg: symbol versions differ (above): no image"; exit 1; }
+		drop="$drop $m"
+	done
+	# with every module that needs one of them
+	while :; do
+		more=$(for d in $drop; do grep -E "[ /]$d\.ko( |\$)" "$M/modules.dep" | cut -d: -f1; done | xargs -r -n1 basename | sed 's/\.ko$//' | sort -u)
+		new=$(comm -13 <(echo "$drop" | tr ' ' '\n' | sort -u) <(echo "$more" | sort -u))
+		[ -z "$new" ] && break
+		drop="$drop $new"
+	done
+	echo "build_bootimg: new drivers left out for their symbol versions:$drop" | tee -a "$B/vendor-dropped.txt"
+	for d in $drop; do rm -f "$K/$d.ko"; done
+	[ $try = 4 ] && { echo "build_bootimg: symbol versions still differ: no image"; exit 1; }
+done
 
 # boot-rawlog.img: the same layer, plus the reference's log writer (k618_probe, in no list of
 # boot.img's) first in the first stage. It writes the kernel log onto the partition named rawdump
@@ -132,10 +161,18 @@ open(f"{d}/modules.options", "a").write(
     "log_ring_kb=16384 log_ring_ms=20 log_ring_keep_kb=4096 log_stall_ms=5000\n")
 PY
 
+# boot-full.img: boot.img's layer with every driver build_vendor.sh brought over loaded too -- at the
+# end of the batch, probing in the background (mklists.py). Apart, so a new driver that hangs in its
+# init cannot cost the boot test.
+cp -a "$T/rd" "$T/rd-full"
+mkdir -p "$B/full"
+python3 -I "$ROOT/scripts/mklists.py" "$T/rd-full/lib/modules" "$ST" "$B/full" "$NEW"
+
 # the layer, built into the kernel: INITRAMFS_SOURCE set and the Image relinked (INITRAMFS_FORCE
 # stays off, or the phone's own ramdisks would not be unpacked at all)
 (cd "$T/rd" && find lib k618_umh | sort | cpio -o -H newc -R 0:0 --quiet) > "$B/initramfs.cpio"
 (cd "$T/rd-rawlog" && find lib k618_umh | sort | cpio -o -H newc -R 0:0 --quiet) > "$B/initramfs-rawlog.cpio"
+(cd "$T/rd-full" && find lib k618_umh | sort | cpio -o -H newc -R 0:0 --quiet) > "$B/initramfs-full.cpio"
 echo "build_bootimg: layer $(du -h "$B/initramfs.cpio" | cut -f1) uncompressed"
 cp "$O/Module.symvers" "$B/Module.symvers.before"
 # diag-nolayer.img: the same kernel without our modules, loading the phone's 6.6 ones (which it
@@ -154,6 +191,7 @@ relink() {	# relink <initramfs> <image>
 		--cmdline "$CMDLINE" -o "$2"
 }
 relink "$B/initramfs-rawlog.cpio" "$B/boot-rawlog.img"
+relink "$B/initramfs-full.cpio" "$B/boot-full.img"
 relink "$B/initramfs.cpio" "$B/boot.img"
 # back to a kernel without the layer, so the next module build sees the configuration it expects
 "$C/scripts/config" --file "$O/.config" --set-str INITRAMFS_SOURCE ""

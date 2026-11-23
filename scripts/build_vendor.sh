@@ -1,0 +1,107 @@
+#!/bin/bash
+# build_vendor.sh: every OnePlus driver the stock phone loads, from the OnePlus 13's own 6.6 sources
+# (src/mods8750/vendor/oplus), as OnePlus' Bazel build defines them -- not a hand-made list.
+#
+#  1. scripts/bzl_eval.py runs OnePlus' BUILD.bazel/.bzl files (Starlark, run as Python with Bazel's
+#     built-ins stubbed) and records every module: sources, include directories, defines, copts,
+#     defconfig, the modules it links against.
+#  2. The tree is copied once (out/vendor/tree), through the 6.12 -> 6.18 sweeps and this port's
+#     own edits, like the other OnePlus builds.
+#  3. scripts/vendor_kbuild.py writes a Kbuild.<module> per module into its package and the build
+#     order: the modules the stock lists name (device/op13/stock) and what they need, less those
+#     build_oplus.sh and build_extra.sh made already.
+#  4. Each module: make M=<package> MO=out/vendor/obj/<module> OPMOD=<module>, against the GKI build,
+#     the SoC configuration (forced in, env.sh) and the Module.symvers of everything built before it.
+#
+# A module that fails is left out with the ones that need it; the boot image is made without it.
+# Modules in out/vendormods (and their names in out/vendormods.list, for mklists.py: they load last,
+# probing in the background), a log each in out/vendor-log, the summary in out/vendor-log/summary.txt.
+set -e
+. "$(dirname "$0")/env.sh"
+SRC=$ROOT/src/mods8750
+W=$ROOT/out/vendor
+T=$W/tree
+OUTM=$ROOT/out/vendormods
+LOG=$ROOT/out/vendor-log
+[ -f "$S/Module.symvers" ] || { echo "build_vendor: build the SoC modules first"; exit 1; }
+rm -rf "$W" "$OUTM" "$LOG" && mkdir -p "$T/vendor" "$W/obj" "$W/inc/soc/oplus" "$W/inc/linux" "$OUTM" "$LOG"
+CONF=$W/soc-autoconf.h
+soc_autoconf "$CONF"
+
+# 1. OnePlus' definitions
+python3 -I "$ROOT/scripts/bzl_eval.py" "$SRC" "$W/modules.json" vendor/oplus
+
+# 2. the build copy
+cp -r "$SRC/vendor/oplus" "$T/vendor/oplus"
+python3 -I "$REF/k618_fix618.py" "$T/vendor/oplus" | grep -v 'k618_fix618: 0 files changed' || true
+python3 -I "$ROOT/scripts/oplus_fix.py" "$T/vendor/oplus"
+# trace headers name their directory from the kernel's include/trace, in OnePlus' tree layout
+grep -rlZ --include='*.h' -E 'define[[:space:]]+TRACE_INCLUDE_PATH[[:space:]]+[./]*vendor/oplus/' "$T/vendor/oplus" \
+	| xargs -0 -r sed -i -E "s#(define[[:space:]]+TRACE_INCLUDE_PATH[[:space:]]+)[./]*(vendor/oplus/)#\1$T/\2#"
+# the charger's generated IC tables (its Bazel rule oplus_chg_ic_cfg runs this script), where its
+# header target (oplus_chg_v2_ic_cfg_headers) has them
+CHG=$T/vendor/oplus/kernel/charger/bazel
+for d in oplus_chg_ic_cfg oplus_chg_v2_ic_cfg; do
+	mkdir -p "$CHG/$d"
+	python3 "$CHG/v2/scripts/ic_cfg_parse.py" -hd "$CHG/$d/oplus_chg_ic_cfg.h" -s "$CHG/$d/oplus_chg_ic_cfg_str.h" \
+		-df "$CHG/$d/oplus_chg_ic_auto_debug.h" "$CHG/v2/config/oplus_chg_ic.json" > "$LOG/charger-ic-cfg.log" 2>&1 \
+		|| echo "build_vendor: the charger's IC tables were not made (charger-ic-cfg.log)"
+done
+# the headers OnePlus' kernel tree has under include/soc/oplus and include/linux, by those paths
+K=$T/vendor/oplus/kernel
+lnk() { [ -e "$2" ] && { mkdir -p "$W/inc/$(dirname "$1")"; ln -sfn "$2" "$W/inc/$1"; }; return 0; }
+for h in boot_mode.h oplus_project.h; do
+	for p in soc/oplus soc/oplus/boot soc/oplus/system; do lnk "$p/$h" "$K/boot/include/$h"; done
+done
+for h in olc.h kernel_fb.h; do
+	for p in soc/oplus/dft soc/oplus/system; do lnk "$p/$h" "$K/dft/include/$h"; done
+done
+lnk soc/oplus/device_info.h "$K/device_info/device_info/bazel/device_info.h"
+lnk soc/oplus/touchpanel_event_notify.h "$K/touchpanel/touchpanel_notify/bazel/touchpanel_event_notify.h"
+lnk soc/oplus/fpga_notify.h "$K/device_info/oplus_fpga/fpga_notify/fpga_notify.h"
+lnk soc/oplus/magcvr_notify.h "$K/device_info/magnetic_cover/magtransfer/magcvr_notify.h"
+lnk soc/oplus/dfr/oplus_bsp_dfr_ubt.h "$K/dfr/include/oplus_bsp_dfr_ubt.h"
+lnk soc/oplus/dfr/theia_send_event.h "$K/dfr/include/theia_send_event.h"
+lnk soc/oplus/system/oplus_mm_kevent_fb.h "$K/multimedia/feedback/common/oplus_mm_kevent_fb.h"
+lnk soc/oplus/system/oplus_trace_sensor.h "$T/vendor/oplus/sensor/kernel/oplus_trace_sensor/oplus_trace_sensor.h"
+lnk linux/oplus_kevent.h "$K/secureguard/gki2.0/rootguard_new/oplus_kevent.h"
+
+# 3. Kbuild files and the order
+ST=$ROOT/device/op13/stock
+python3 -I "$ROOT/scripts/vendor_kbuild.py" "$W/modules.json" "$T" \
+	"$ST/first_stage.load:$ST/vendor_dlkm.load:$ST/system_dlkm.load" \
+	"$ROOT/out/oplusmods:$ROOT/out/extramods" "$W/plan.txt"
+
+# 4. build
+SYMS="$S/Module.symvers $(ls "$ROOT"/out/tp-log/*.symvers "$ROOT"/out/oplus/*/Module.symvers "$ROOT"/out/extra/*/Module.symvers 2>/dev/null | tr '\n' ' ')"
+ok=0; bad=0; failed=" "; : > "$LOG/summary.txt"
+while IFS='|' read -r name pkg base needs; do
+	for n in $needs; do
+		case $failed in *" $n "*)
+			echo "build_vendor: $name: left out ($n failed)" | tee -a "$LOG/summary.txt"
+			bad=$((bad + 1)); failed="$failed$name "; continue 2;;
+		esac
+	done
+	MO=$W/obj/$name
+	mkdir -p "$MO"
+	set +e
+	"${KMAKE[@]}" M="$T/$pkg" MO="$MO" OPMOD="$base" modules -j"$J" KBUILD_EXTRA_SYMBOLS="$SYMS" \
+		NOSTDINC_FLAGS="-nostdinc -I$S/include -I$W/inc" KCFLAGS="-Wno-error -include $CONF" \
+		> "$LOG/$name.log" 2>&1
+	rc=$?
+	set -e
+	if [ $rc -ne 0 ] || [ ! -f "$MO/$base.ko" ]; then
+		echo "build_vendor: $name: FAILED (make exit $rc)" | tee -a "$LOG/summary.txt"
+		grep -E ': (fatal )?error: |^ERROR: modpost' "$LOG/$name.log" | sed -E "s|$T/||" | head -6 \
+			| tee -a "$LOG/summary.txt" || true
+		bad=$((bad + 1)); failed="$failed$name "
+		continue
+	fi
+	echo "build_vendor: $name: built" | tee -a "$LOG/summary.txt"
+	ok=$((ok + 1))
+	SYMS="$SYMS $MO/Module.symvers"
+	cp "$MO/$base.ko" "$OUTM/"
+done < "$W/plan.txt"
+ls "$OUTM" | sed 's/\.ko$//' > "$ROOT/out/vendormods.list"
+echo "build_vendor: built $ok, failed $bad" | tee -a "$LOG/summary.txt"
+[ "$bad" -eq 0 ]

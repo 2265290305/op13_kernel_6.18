@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""mklists.py <rd lib/modules dir> <stock dir> <report dir>: the module lists of our layer.
+"""mklists.py <rd lib/modules dir> <stock dir> <report dir> [new list [hold]]: the module lists of our layer.
 
   modules.load (+ .recovery, .charger)  first-stage init's list: the phone's own first-stage
                                         order, only the modules we have, then k618_load last
@@ -31,6 +31,12 @@ EARLY = ["qcom_dynamic_ramoops"]
 # port (scripts/build_extra.sh) that are not needed to boot -- one that hangs or oopses at load then
 # holds nothing else up. Their probes also run asynchronously (driver_async_probe= in the cmdline).
 LATE = ["oplus_bsp_synaptics_tcm2"]
+# the new list (optional, one module name a line): every driver scripts/build_vendor.sh brought over
+# from OnePlus' 6.6 sources. They are LATE too, also those the phone loads in its first stage (they
+# move to the end of the batch), and each gets async_probe=1 in modules.options: its probes run in
+# the background and loading it does not wait for them (test-31: a probe that oopsed while the load
+# waited stopped the boot). With "hold" after it, they are in no list at all: in the layer for
+# modprobe, not loaded (boot.img; boot-full.img loads them).
 
 
 def canon(name):
@@ -43,6 +49,11 @@ def read_list(path):
 
 def main(argv):
     rd, stock, report = argv[1], argv[2], argv[3]
+    new = set()
+    if len(argv) > 4 and os.path.isfile(argv[4]):
+        new = {canon(line) for line in open(argv[4]) if line.strip()}
+    hold = len(argv) > 5 and argv[5] == "hold"
+    late_names = set(LATE) | new
     have = {canon(f): f for f in os.listdir(rd) if f.endswith(".ko")}
     blocked = {canon(line.split()[1]) for line in read_list(f"{stock}/modules.blocklist")
                if line.startswith("blocklist ")}
@@ -55,7 +66,8 @@ def main(argv):
     for n in read_list(f"{stock}/first_stage.load"):
         k = canon(n)
         (first if k in have else missing_first).append(have.get(k, n))
-    first = [m for m in first if canon(m) != "k618_load"]
+    moved = [m for m in first if canon(m) in new]
+    first = [m for m in first if canon(m) != "k618_load" and canon(m) not in new]
     early = [have[k] for k in EARLY if k in have]
     first = early + [m for m in first if m not in early]
 
@@ -67,18 +79,21 @@ def main(argv):
             in_init.add(m)
             todo += deps.get(m, [])
 
-    wanted, missing_second = [], []
+    # new drivers the phone has in its first stage: to the batch (unless a first-stage one needs them)
+    wanted, missing_second = [m for m in moved if m not in in_init and not hold], []
     for lst in ("vendor_dlkm.load", "system_dlkm.load"):
         for n in read_list(f"{stock}/{lst}"):
             k = canon(n)
             if k not in have:
                 missing_second.append(os.path.basename(n))
+            elif hold and k in new:
+                continue
             elif k not in blocked and have[k] not in in_init and have[k] not in wanted:
                 wanted.append(have[k])
     # modules no stock list names stay in the layer for modprobe on demand, never loaded blindly:
     # some are self-tests (torture, KUnit) that must not run on a phone
     extra = sorted(f for k, f in have.items() if f not in in_init and f not in wanted
-                   and k not in blocked and k != "k618_load")
+                   and k not in blocked and k != "k618_load" and not (hold and k in new))
     ordered, placed = [], set()
 
     def place(m, path=()):
@@ -88,7 +103,7 @@ def main(argv):
             place(d, path + (m,))
         placed.add(m)
         ordered.append(m)
-    late = [m for m in wanted if canon(m) in LATE]
+    late = [m for m in wanted if canon(m) in late_names]
     for m in wanted:
         if m not in late:
             place(m)
@@ -103,7 +118,8 @@ def main(argv):
         f.write("# op13: the batch loader after the whole first stage\n")
         f.write("softdep k618_load pre: " + " ".join(canon(m) for m in first) + "\n")
     open(f"{rd}/modules.options", "w").write(
-        "options k618_load list=/lib/modules/k618_batch.load dir=/lib/modules helper=/k618_umh\n")
+        "options k618_load list=/lib/modules/k618_batch.load dir=/lib/modules helper=/k618_umh\n"
+        + "".join(f"options {canon(m)} async_probe=1\n" for m in late if canon(m) in new))
     shutil.copy(f"{stock}/modules.blocklist", f"{rd}/modules.blocklist")
 
     os.makedirs(report, exist_ok=True)
@@ -111,7 +127,8 @@ def main(argv):
     open(f"{report}/second-stage-missing.txt", "w").write("".join(m + "\n" for m in missing_second))
     print(f"mklists: first stage {len(first)} of the phone's {len(first) + len(missing_first)} "
           f"(+ k618_load); batch {len(ordered)}; {len(extra)} on demand only; "
-          f"second-stage modules we lack: {len(missing_second)}")
+          f"second-stage modules we lack: {len(missing_second)}; new drivers at the end: "
+          f"{len([m for m in late if canon(m) in new])}")
     return 0
 
 
