@@ -27,6 +27,10 @@ import sys
 
 
 EARLY = ["qcom_dynamic_ramoops"]
+# LATE modules go to the end of the batch, whatever list the phone has them in: drivers new to this
+# port (scripts/build_extra.sh) that are not needed to boot -- one that hangs or oopses at load then
+# holds nothing else up. Their probes also run asynchronously (driver_async_probe= in the cmdline).
+LATE = ["oplus_bsp_synaptics_tcm2"]
 
 
 def canon(name):
@@ -84,7 +88,11 @@ def main(argv):
             place(d, path + (m,))
         placed.add(m)
         ordered.append(m)
+    late = [m for m in wanted if canon(m) in LATE]
     for m in wanted:
+        if m not in late:
+            place(m)
+    for m in late:
         place(m)
 
     init_list = first + ["k618_load.ko"]

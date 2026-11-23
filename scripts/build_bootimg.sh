@@ -38,7 +38,9 @@ BASE="printk.devkmsg=on log_buf_len=16M sysctl.kernel.panic_on_oops=0 sysctl.ker
 # cold one that loses the RAM log (test-13, test-21), a button reset keeps it (test-15)
 # op13_hold_reboot=1: so does a restart userspace asks for (test-23 went to recovery after ~15 s):
 # held, with its log kept for the button reset (tools/prep_common.sh)
-CMDLINE=${CMDLINE:-op13_modload_tolerate=1 op13_deadline=180 op13_hold_reboot=1 $BASE panic=0}
+# driver_async_probe: the touch screen's drivers (scripts/build_extra.sh) probe in the background, so
+# the batch loader does not wait on a touch controller that takes long or never answers
+CMDLINE=${CMDLINE:-op13_modload_tolerate=1 op13_deadline=180 op13_hold_reboot=1 driver_async_probe=synaptics_tcm_spi,synaptics_tcm_hbp $BASE panic=0}
 [ -f "$O/Module.symvers" ] || { echo "build_bootimg: build the kernel first"; exit 1; }
 # an image without the SoC modules cannot get past the first stage: none at all, rather than one
 # that only looks testable
@@ -60,7 +62,7 @@ chmod 755 "$T/rd/k618_umh"
 # modules_install (already stripped and signed), where no vendor module has the same name
 K=$T/mods/lib/modules/$REL/kernel
 SIGN() { "$O/scripts/sign-file" sha256 "$O/certs/signing_key.pem" "$O/certs/signing_key.x509" "$1"; }
-for f in $(find "$S" -name '*.ko') "$ROOT"/out/tpmods/*.ko "$ROOT"/out/oplusmods/*.ko "$B"/helpers/*.ko; do
+for f in $(find "$S" -name '*.ko') "$ROOT"/out/tpmods/*.ko "$ROOT"/out/oplusmods/*.ko "$ROOT"/out/extramods/*.ko "$B"/helpers/*.ko; do
 	[ -f "$f" ] || continue
 	llvm-strip --strip-debug -o "$K/$(basename "$f")" "$f"
 	SIGN "$K/$(basename "$f")"

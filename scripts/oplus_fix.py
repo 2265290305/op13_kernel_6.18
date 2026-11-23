@@ -11,6 +11,9 @@ EDITS = [
     ("bootloader_log.c",
      "static int __exit bootloader_log_remove(struct platform_device *pdev)\n{\n\treturn -EBUSY;\n}",
      "static void bootloader_log_remove(struct platform_device *pdev)\n{\n}"),
+    # the kernel's private procfs header by a path from OnePlus' tree layout (drivers/soc/oplus/...);
+    # nothing of it is used (proc_create_data and pde_data are public)
+    ("device_info.c", '#include "../../../../fs/proc/internal.h"\n', ""),
 ]
 
 
