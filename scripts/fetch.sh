@@ -37,7 +37,7 @@ fetch() {
 # Only those directories (sparse; the whole tree is 2 GB).
 MSM8750_DIRS="include drivers/soc/qcom/dcvs drivers/leds/fan drivers/leds/aw210xx
 	drivers/regulator/camera_aw37004 drivers/thermal/qcom drivers/clk/qcom drivers/pinctrl/qcom
-	drivers/interconnect/qcom drivers/phy/qualcomm drivers/firmware/arm_scmi"
+	drivers/interconnect/qcom drivers/phy/qualcomm drivers/firmware/arm_scmi drivers/clk/clk.h"
 fetch_sparse() {
 	local path=$1 url=$2 rev=$3
 	if [ -d "$path/.git" ] && git -C "$path" rev-parse -q --verify HEAD > /dev/null; then

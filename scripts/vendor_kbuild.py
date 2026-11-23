@@ -70,10 +70,21 @@ def exported_includes(m, seen=None):
 		for i in m["includes"] + m["linux_includes"]]
 	for dep in m["deps"] + m["hdrs"]:
 		if dep in headers:
-			h = headers[dep]
-			out += [os.path.join(TREE, i) for i in h["includes"] + h["linux_includes"]]
+			out += header_includes(dep, seen)
 		elif dep in by_label:
 			out += exported_includes(by_label[dep], seen)
+	return out
+
+
+def header_includes(label, seen):
+	"""a header target's directories, and those of the header targets it gathers."""
+	if label in seen or label not in headers:
+		return []
+	seen.add(label)
+	h = headers[label]
+	out = [os.path.join(TREE, i) for i in h["includes"] + h["linux_includes"]]
+	for t in h.get("targets", []):
+		out += header_includes(t, seen)
 	return out
 
 

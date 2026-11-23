@@ -65,9 +65,15 @@ for d in "$T"/vendor/*; do
 done
 # the reference's 6.12 -> 6.18 techpack fixes (not its Xiaomi or 5.15 ones), as build_tp.sh
 python3 -I "$ROOT/scripts/tp_fix.py" "$REF" "$T/vendor/qcom/opensource"
-# trace headers name their directory from the kernel's include/trace, in OnePlus' tree layout
-grep -rlZ --include='*.h' -E 'define[[:space:]]+TRACE_INCLUDE_PATH[[:space:]]+[./]*vendor/(oplus|qcom)/' "$T/vendor" \
-	| xargs -0 -r sed -i -E "s#(define[[:space:]]+TRACE_INCLUDE_PATH[[:space:]]+)[./]*(vendor/(oplus|qcom)/)#\1$T/\2#"
+# and the 6.6 -> 6.18 API changes these 6.6 sources meet (platform remove, const sysfs/sysctl
+# callbacks, struct fd, unaligned.h, strlcpy, DAI formats, ...)
+python3 -I "$ROOT/scripts/vendor_fix618.py" "$T/vendor" "$T/msm8750"
+# trace headers name their own directory relative to the kernel's include/trace, in their tree's
+# layout (../../../vendor/..., ../../kernel/oplus_cpu/...): each relative one becomes the absolute
+# directory of the header that defines it
+grep -rlZ --include='*.h' -E 'define[[:space:]]+[A-Z0-9_]*TRACE_INCLUDE_PATH[[:space:]]+\.' "$T" | while IFS= read -r -d '' h; do
+	sed -i -E "s#(define[[:space:]]+[A-Z0-9_]*TRACE_INCLUDE_PATH[[:space:]]+)\.[^[:space:]]*#\1$(dirname "$h")#" "$h"
+done
 # the charger's generated IC tables (its Bazel rule oplus_chg_ic_cfg runs this script), where its
 # header target (oplus_chg_v2_ic_cfg_headers) has them
 CHG=$T/vendor/oplus/kernel/charger/bazel
@@ -77,11 +83,12 @@ for d in oplus_chg_ic_cfg oplus_chg_v2_ic_cfg; do
 		-df "$CHG/$d/oplus_chg_ic_auto_debug.h" "$CHG/v2/config/oplus_chg_ic.json" > "$LOG/charger-ic-cfg.log" 2>&1 \
 		|| echo "build_vendor: the charger's IC tables were not made (charger-ic-cfg.log)"
 done
-# the headers OnePlus' kernel tree has under include/soc/oplus and include/linux, by those paths
+# the headers OnePlus' kernel tree has under include/soc/oplus and include/linux, by those paths;
+# boot's as a whole set in each place (oplus_project.h includes oplus_project_data_ocdt.h next to it)
 K=$T/vendor/oplus/kernel
 lnk() { [ -e "$2" ] && { mkdir -p "$W/inc/$(dirname "$1")"; ln -sfn "$2" "$W/inc/$1"; }; return 0; }
-for h in boot_mode.h oplus_project.h; do
-	for p in soc/oplus soc/oplus/boot soc/oplus/system; do lnk "$p/$h" "$K/boot/include/$h"; done
+for h in "$K"/boot/include/*.h; do
+	for p in soc/oplus soc/oplus/boot soc/oplus/system; do lnk "$p/$(basename "$h")" "$h"; done
 done
 for h in olc.h kernel_fb.h; do
 	for p in soc/oplus/dft soc/oplus/system; do lnk "$p/$h" "$K/dft/include/$h"; done
@@ -95,6 +102,14 @@ lnk soc/oplus/dfr/theia_send_event.h "$K/dfr/include/theia_send_event.h"
 lnk soc/oplus/system/oplus_mm_kevent_fb.h "$K/multimedia/feedback/common/oplus_mm_kevent_fb.h"
 lnk soc/oplus/system/oplus_trace_sensor.h "$T/vendor/oplus/sensor/kernel/oplus_trace_sensor/oplus_trace_sensor.h"
 lnk linux/oplus_kevent.h "$K/secureguard/gki2.0/rootguard_new/oplus_kevent.h"
+lnk linux/pogo_common.h "$K/device_info/pogo_keyboard/pogo_common.h"
+# OnePlus' cpu tree as its kernel has it (kernel/oplus_cpu): includes of "../kernel/oplus_cpu/..."
+# resolve from the include directory above
+mkdir -p "$W/kernel" && ln -sfn "$K/cpu" "$W/kernel/oplus_cpu"
+# the OnePlus 13 vendor kernel's device-tree bindings (the other chipsets' clocks), after every other
+# header: only those, its linux/ headers are 6.6's
+mkdir -p "$W/inc8750" && [ -d "$ROOT/src/msm8750/include/dt-bindings" ] \
+	&& ln -sfn "$ROOT/src/msm8750/include/dt-bindings" "$W/inc8750/dt-bindings"
 
 # what the other builds make already (SoC, techpacks, the kernel's own, OnePlus' boot and touch
 # modules): not made again
@@ -124,8 +139,8 @@ while IFS='|' read -r name pkg base needs; do
 	mkdir -p "$MO"
 	set +e
 	"${KMAKE[@]}" M="$T/$pkg" MO="$MO" OPMOD="$base" modules -j"$J" KBUILD_EXTRA_SYMBOLS="$SYMS" \
-		NOSTDINC_FLAGS="-nostdinc -I$S/include -I$W/inc" KCFLAGS="-Wno-error -include $CONF" \
-		> "$LOG/$name.log" 2>&1
+		NOSTDINC_FLAGS="-nostdinc -I$S/include -I$W/inc -idirafter $W/inc8750" \
+		KCFLAGS="-Wno-error -include $CONF" > "$LOG/$name.log" 2>&1
 	rc=$?
 	set -e
 	if [ $rc -ne 0 ] || [ ! -f "$MO/$base.ko" ]; then
@@ -155,7 +170,7 @@ while IFS='|' read -r dir opts names; do
 	set +e
 	# shellcheck disable=SC2086
 	"${KMAKE[@]}" M="$T/$dir" MO="$MO" modules -j"$J" KBUILD_EXTRA_SYMBOLS="$SYMS" $vars \
-		NOSTDINC_FLAGS="-nostdinc -I$S/include -I$W/inc -idirafter $ROOT/src/msm8750/include" \
+		NOSTDINC_FLAGS="-nostdinc -I$S/include -I$W/inc -idirafter $W/inc8750" \
 		KCFLAGS="-Wno-error -include $CONF $defs" \
 		> "$LOG/$tag.log" 2>&1
 	rc=$?

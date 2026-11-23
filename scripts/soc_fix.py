@@ -15,6 +15,12 @@ FROM_KERNEL = [
 
 # (file, old, new)
 EDITS = [
+    # the OnePlus 13's alert slider (oplus_bsp_tri_key) registers as TRI_STATE_KEY_FOR_SEC too, a
+    # client the OnePlus 13's own 6.6 header has after POGOPIN and the SM8850 one does not. Every user
+    # of the enum (SoC, techpacks, OnePlus modules) is built from this header, so it is added here
+    ("include/linux/soc/qcom/panel_event_notifier.h",
+     "\tPANEL_EVENT_NOTIFIER_CLIENT_POGOPIN,\n",
+     "\tPANEL_EVENT_NOTIFIER_CLIENT_POGOPIN,\n\tPANEL_EVENT_NOTIFIER_CLIENT_TRI_STATE_KEY_FOR_SEC,\n"),
     # nr_irqs is no longer exported in 6.18; irq_get_nr_irqs() is
     ("drivers/soc/qcom/gic_intr_routing.c", "i < nr_irqs;", "i < irq_get_nr_irqs();"),
     # the reference's key-manager step before the first wrapped key (ice.c, k618_ice_hwkm_setup) is
@@ -40,6 +46,8 @@ def main(argv):
     for rel, old, new in EDITS:
         path = os.path.join(soc, rel)
         text = open(path, encoding="utf-8", errors="surrogateescape").read()
+        if new in text:
+            continue
         if old in text:
             open(path, "w", encoding="utf-8", errors="surrogateescape", newline="").write(text.replace(old, new))
             n += 1

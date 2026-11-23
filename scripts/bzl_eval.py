@@ -218,16 +218,32 @@ def ddk_submodule(name, srcs=(), out=None, deps=(), local_defines=(), copts=(), 
 
 
 def resolve_files(pkg, x):
-	"""a label or a list of them (files, or genrule-made ones we cannot have) -> package paths."""
+	"""a label or a list of them -> package paths: files, or what a genrule that concatenates files
+	(Wi-Fi's defconfigs: cat $(SRCS) > $@) makes them from."""
 	out = []
 	for one in (x if isinstance(x, (list, tuple)) else [x]):
 		if not isinstance(one, str):
 			continue
 		p, n = label_to_path(pkg, one)
-		f = os.path.join(p, n)
+		f = os.path.normpath(os.path.join(p, n))
 		if os.path.isfile(os.path.join(ROOT, f)):
 			out.append(f)
+		elif f in GENRULES:
+			out += GENRULES[f]
 	return out
+
+
+GENRULES = {}
+
+
+def genrule(name=None, outs=(), srcs=(), cmd="", **kw):
+	"""native.genrule: only the ones that concatenate their sources are understood."""
+	if not re.fullmatch(r"\s*cat\s+\$\(SRCS\)\s*>\s*\$@\s*", cmd or ""):
+		return
+	pkg = CUR["pkg"]
+	files = resolve_files(pkg, list(srcs or []))
+	for o in list(outs or []) + ([name] if name else []):
+		GENRULES[os.path.normpath(os.path.join(pkg, o))] = files
 
 
 def ddk_headers(name, hdrs=(), includes=(), linux_includes=(), **kw):
@@ -237,6 +253,9 @@ def ddk_headers(name, hdrs=(), includes=(), linux_includes=(), **kw):
 		"includes": [os.path.normpath(os.path.join(pkg, i)) for i in includes or ()],
 		"linux_includes": [os.path.normpath(os.path.join(pkg, i)) for i in linux_includes or ()],
 		"hdrs": [h for h in (hdrs or []) if isinstance(h, str)],
+		# header targets it gathers (Qualcomm's audio_headers is only a list of others)
+		"targets": ["%s:%s" % label_to_path(pkg, h) for h in (hdrs or []) if isinstance(h, str)
+			and (h.startswith(":") or h.startswith("//"))],
 	}
 
 
@@ -284,12 +303,12 @@ SHIMS = None
 
 
 def builtins_for(pkg):
-	nat = Native(glob=Glob(), genrule=noop, filegroup=noop, alias=noop, exports_files=noop,
+	nat = Native(glob=Glob(), genrule=genrule, filegroup=noop, alias=noop, exports_files=noop,
 		sh_binary=noop, py_binary=noop, cc_library=noop, package_name=lambda: pkg,
 		existing_rule=lambda n: None, existing_rules=lambda: {})
 	return {
 		"native": nat, "glob": nat.glob, "struct": struct, "fail": fail, "select": select,
-		"package": noop, "genrule": noop, "filegroup": noop, "alias": noop, "exports_files": noop,
+		"package": noop, "genrule": genrule, "filegroup": noop, "alias": noop, "exports_files": noop,
 		"py_binary": noop, "sh_binary": noop, "cc_library": noop, "config_setting": noop,
 		"bool_flag": noop, "string_flag": noop, "licenses": noop,
 		"True": True, "False": False, "None": None, "print": lambda *a, **k: None,
@@ -328,7 +347,10 @@ def do_load(env, pkg, label, names, alias):
 	if label in SHIMS:
 		src = SHIMS[label]
 	elif label.startswith("//build/kernel/oplus:"):
-		src = load_file(os.path.join(MACROS, label.split(":", 1)[1]), "kernel_platform/oplus/bazel")
+		src = load_file(os.path.join(MACROS, label.split(":", 1)[1]), "@macros")
+	elif label.startswith(":") and pkg == "@macros":
+		# a file next to OnePlus' macro file (its variant file): from there, wherever the tree is
+		src = load_file(os.path.join(MACROS, label[1:]), "@macros")
 	elif label.startswith(":") or label.startswith("//vendor/"):
 		p, n = label_to_path(pkg, label)
 		src = load_file(os.path.join(ROOT, p, n), p)
