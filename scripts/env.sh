@@ -30,8 +30,15 @@ KMAKE=(make -C "$C" O="$O" ARCH=arm64 LLVM=1 LLVM_IAS=1 LOCALVERSION=)
 # Every build against the SoC headers needs it forced in: those headers turn functions into inline
 # stubs when an option looks off (smem.h's qcom_smem_get() then "returns" 0x13, and OnePlus'
 # project info crashed reading it, test-31).
+# The options build_soc.sh sets on beyond sun_perf (out/soc-forced-opts.txt) are left out too: they are
+# there to build the SoC modules the phone loads, and the code built against the SoC from outside
+# sees sun_perf's configuration as before (one of them, tmecom, cost securemsm's link: test-26).
 soc_autoconf() {
-	awk '/^#ifndef CONFIG_ARCH_/ && $2 != "CONFIG_ARCH_SUN" { skip = 3 }
+	local forced=" "
+	[ -f "$ROOT/out/soc-forced-opts.txt" ] && forced=" $(cut -d= -f1 "$ROOT/out/soc-forced-opts.txt" | tr '\n' ' ')"
+	awk -v forced="$forced" '
+	     /^#ifndef CONFIG_/ { o = $2; sub(/_MODULE$/, "", o); if (index(forced, " " o " ")) { skip = 3 } }
+	     /^#ifndef CONFIG_ARCH_/ && $2 != "CONFIG_ARCH_SUN" { skip = 3 }
 	     /^#ifndef CONFIG_DEVFREQ_GOV_QCOM_(ADRENO_TZ|GPUBW_MON)(_MODULE)?$/ { skip = 3 }
 	     skip { skip--; next } { print }' "$S/gen/autoconf_vendor.h" > "$1"
 	grep -q 'CONFIG_ARCH_SUN' "$1" || { echo "soc_autoconf: CONFIG_ARCH_SUN is not in the SoC configuration"; return 1; }
