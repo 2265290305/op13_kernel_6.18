@@ -149,7 +149,7 @@ PY
 				MO=$P/obj/$name
 				mkdir -p "$MO"
 				"${KMAKE[@]}" M="$T/$pkg" MO="$MO" OPMOD="$base" modules -j1 KBUILD_EXTRA_SYMBOLS="$SYMS" \
-					NOSTDINC_FLAGS="-nostdinc -I$S/include -I$P/inc -idirafter $W/inc8750" \
+					NOSTDINC_FLAGS="-nostdinc -I$S/include -I$P/inc -idirafter $W/inc8750 -idirafter $C" \
 					KCFLAGS="-Wno-error -include $CONF" > "$LOG/$(basename "$P")-$name.log" 2>&1
 				echo "$? $MO/$base.ko" > "$MO/.result"
 			) < /dev/null &
@@ -186,7 +186,7 @@ PY
 		set +e
 		# shellcheck disable=SC2086
 		"${KMAKE[@]}" M="$T/$dir" MO="$MO" modules -j"$J" KBUILD_EXTRA_SYMBOLS="$SYMS" $vars \
-			NOSTDINC_FLAGS="-nostdinc -I$S/include -I$P/inc -idirafter $W/inc8750" \
+			NOSTDINC_FLAGS="-nostdinc -I$S/include -I$P/inc -idirafter $W/inc8750 -idirafter $C" \
 			KCFLAGS="-Wno-error -include $CONF $defs" > "$LOG/$tag.log" 2>&1
 		rc=$?
 		set -e

@@ -96,6 +96,10 @@ RULES = [
 	# the inode times are behind accessors (6.7): a helper updating one in place gets a copy written back
 	("inode times", re.compile(r"\b(\w+)\(\s*&\s*(file_inode\(\s*\w+\s*\)|\w+)->i_(m|a)time\s*\)\s*;"),
 		r"{ struct timespec64 __k618_t = inode_get_\3time(\2); \1(&__k618_t); inode_set_\3time_to_ts(\2, __k618_t); }"),
+	# the kernel's own private headers, by the path OnePlus' tree layout gives them: from the kernel
+	# source (build_vendor.sh puts it after every other include directory)
+	("kernel headers", re.compile(r'#include\s*"(?:\.\./)+(kernel/(?:irq|sched|locking|time|cgroup|workqueue|rcu)/[\w./-]+\.h)"'),
+		r"#include <\1>"),
 	# dma_fence_ops lost its debug printers (6.12); __dma_fence_is_later takes the fence first (6.13)
 	("dma-fence", re.compile(r"^[ \t]*\.(?:fence|timeline)_value_str\s*=\s*\w+\s*,[ \t]*\n", re.M), ""),
 	("dma-fence", re.compile(r"\b__dma_fence_is_later\(\s*([^,()]+?)\s*,\s*([^,()]+?)\s*,\s*(\w+)->ops\s*\)"),
@@ -215,6 +219,12 @@ def fix(path):
 		text2 = re.sub(r"\b%s\.file\b" % re.escape(var), "fd_file(%s)" % var, text)
 		if text2 != text:
 			note(path, "struct fd")
+			text = text2
+	# nr_irqs is not exported in 6.18: irq_get_nr_irqs() (where the file has no nr_irqs of its own)
+	if re.search(r"\bnr_irqs\b", text) and not re.search(r"\b(?:int|unsigned|u32|u16|size_t)\s+(?:int\s+)?nr_irqs\b|->nr_irqs|\.nr_irqs", text):
+		text2 = re.sub(r"\bnr_irqs\b(?!\s*\()", "irq_get_nr_irqs()", text)
+		if text2 != text:
+			note(path, "nr_irqs")
 			text = text2
 	# kernel/sched/sched.h has css_tg() since 6.7: a file that includes it drops its own copy
 	if "kernel/sched/sched.h" in text:
