@@ -117,37 +117,63 @@ prepare() {
 
 # build <pass dir> <wanted lists> <search dirs for Makefile-only modules...>
 build() {
-	local P=$1 WANT=$2 T=$1/tree name pkg base needs n MO rc dir opts names tag vars defs o ko
+	local P=$1 WANT=$2 T=$1/tree name pkg base needs n MO rc dir opts names tag vars defs o ko _l
 	shift 2
-	local failed=" "
 	python3 -I "$ROOT/scripts/vendor_kbuild.py" "$P/modules.json" "$T" "$WANT" "$HAVE:$OUTM" "$P/plan.txt"
-	while IFS='|' read -r name pkg base needs; do
-		for n in $needs; do
-			case $failed in *" $n "*)
-				echo "build_vendor: $name: left out ($n failed)" | tee -a "$LOG/summary.txt"
-				failed="$failed$name "; continue 2;;
-			esac
-		done
-		MO=$P/obj/$name
-		mkdir -p "$MO"
-		set +e
-		"${KMAKE[@]}" M="$T/$pkg" MO="$MO" OPMOD="$base" modules -j"$J" KBUILD_EXTRA_SYMBOLS="$SYMS" \
-			NOSTDINC_FLAGS="-nostdinc -I$S/include -I$P/inc -idirafter $W/inc8750" \
-			KCFLAGS="-Wno-error -include $CONF" > "$LOG/$(basename "$P")-$name.log" 2>&1
-		rc=$?
-		set -e
-		if [ $rc -ne 0 ] || [ ! -f "$MO/$base.ko" ]; then
-			echo "build_vendor: $name: FAILED ($(basename "$P"), make exit $rc)" | tee -a "$LOG/summary.txt"
-			grep -E ': (fatal )?error: |^ERROR: modpost' "$LOG/$(basename "$P")-$name.log" | sed -E "s|$T/||" | head -6 \
-				| tee -a "$LOG/summary.txt" || true
-			failed="$failed$name "
-			continue
-		fi
-		echo "build_vendor: $name: built ($(basename "$P"))" | tee -a "$LOG/summary.txt"
-		ok=$((ok + 1))
-		SYMS="$SYMS $MO/Module.symvers"
-		cp "$MO/$base.ko" "$OUTM/"
-	done < "$P/plan.txt"
+	# in dependency levels (a module after everything it links against), each level's modules side
+	# by side, one per CPU: most of them need nothing of one another
+	python3 -I - "$P/plan.txt" > "$P/levels.txt" <<'PY'
+import sys
+plan = [l.rstrip("\n").split("|") for l in open(sys.argv[1]) if l.strip()]
+names = {p[0] for p in plan}
+lvl = {}
+for name, _pkg, _base, needs in plan:		# the plan is in dependency order
+	lvl[name] = 1 + max([lvl.get(n, 0) for n in needs.split() if n in names] + [0])
+for p in plan:
+	print("%d|%s" % (lvl[p[0]], "|".join(p)))
+PY
+	: > "$P/failed"
+	local level max
+	max=$(cut -d'|' -f1 "$P/levels.txt" | sort -n | tail -1)
+	for level in $(seq 1 "${max:-0}"); do
+		while IFS='|' read -r _l name pkg base needs; do
+			[ "$_l" = "$level" ] || continue
+			for n in $needs; do
+				if grep -qx "$n" "$P/failed"; then
+					echo "build_vendor: $name: left out ($n failed)" | tee -a "$LOG/summary.txt"
+					echo "$name" >> "$P/failed"; continue 2
+				fi
+			done
+			while [ "$(jobs -rp | wc -l)" -ge "$J" ]; do wait -n || true; done
+			(
+				MO=$P/obj/$name
+				mkdir -p "$MO"
+				"${KMAKE[@]}" M="$T/$pkg" MO="$MO" OPMOD="$base" modules -j1 KBUILD_EXTRA_SYMBOLS="$SYMS" \
+					NOSTDINC_FLAGS="-nostdinc -I$S/include -I$P/inc -idirafter $W/inc8750" \
+					KCFLAGS="-Wno-error -include $CONF" > "$LOG/$(basename "$P")-$name.log" 2>&1
+				echo "$? $MO/$base.ko" > "$MO/.result"
+			) < /dev/null &
+		done < "$P/levels.txt"
+		wait
+		# the level's results, in plan order
+		while IFS='|' read -r _l name pkg base needs; do
+			[ "$_l" = "$level" ] || continue
+			MO=$P/obj/$name
+			[ -f "$MO/.result" ] || continue
+			read -r rc ko < "$MO/.result"
+			if [ "$rc" -ne 0 ] || [ ! -f "$ko" ]; then
+				echo "build_vendor: $name: FAILED ($(basename "$P"), make exit $rc)" | tee -a "$LOG/summary.txt"
+				grep -E ': (fatal )?error: |^ERROR: modpost' "$LOG/$(basename "$P")-$name.log" | sed -E "s|$T/||" | head -6 \
+					| tee -a "$LOG/summary.txt" || true
+				echo "$name" >> "$P/failed"
+				continue
+			fi
+			echo "build_vendor: $name: built ($(basename "$P"))" | tee -a "$LOG/summary.txt"
+			ok=$((ok + 1))
+			SYMS="$SYMS $MO/Module.symvers"
+			cp "$ko" "$OUTM/"
+		done < "$P/levels.txt"
+	done
 	# the wanted modules made from plain Makefiles: each directory built once, with the options that
 	# switch its wanted modules on set to m (and defined for the C code)
 	python3 -I "$ROOT/scripts/vendor_mkplan.py" "$T" "$WANT" "$HAVE:$OUTM" "$P/mkplan.txt" "$@"
