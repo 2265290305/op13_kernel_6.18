@@ -50,20 +50,22 @@ class Glob:
 
 	def __call__(self, include, exclude=(), allow_empty=True, exclude_directories=1):
 		base = os.path.join(ROOT, CUR["pkg"])
-		files = []
-		for d, ds, fs in os.walk(base, followlinks=True):
-			ds[:] = [x for x in ds if not x.startswith(".")]
-			for f in fs:
-				files.append(os.path.relpath(os.path.join(d, f), base))
-		def match(p, pats):
-			for pat in pats:
-				# Bazel's ** matches any number of directories, including none
-				rx = re.escape(pat).replace(r"\*\*/", "(?:.*/)?").replace(r"\*\*", ".*") \
-					.replace(r"\*", "[^/]*").replace(r"\?", "[^/]")
-				if re.fullmatch(rx, p):
-					return True
-			return False
-		return sorted(p for p in files if match(p, include) and not match(p, exclude))
+		files = LISTING.get(base)
+		if files is None:		# once per package: Wi-Fi's files call glob() hundreds of times
+			files = []
+			for d, ds, fs in os.walk(base, followlinks=True):
+				ds[:] = [x for x in ds if not x.startswith(".")]
+				for f in fs:
+					files.append(os.path.relpath(os.path.join(d, f), base))
+			LISTING[base] = files
+		if isinstance(include, str):
+			include = [include]
+		# plain names (most of Wi-Fi's): looked up, not matched
+		if not exclude and all(not any(c in p for c in "*?[") for p in include):
+			have = LISTSET.get(base) or LISTSET.setdefault(base, set(files))
+			return sorted(p for p in include if p in have)
+		rxs, exs = [rx(p) for p in include], [rx(p) for p in exclude]
+		return sorted(p for p in files if any(r.fullmatch(p) for r in rxs) and not any(r.fullmatch(p) for r in exs))
 
 
 def noop(*a, **k):
@@ -96,6 +98,18 @@ def startype(x):
 	return "function" if callable(x) else "struct"
 
 
+class Depset(list):
+	"""depset(): a list with Starlark's to_list()."""
+
+	def __init__(self, direct=None, transitive=None, **k):
+		super().__init__(direct or [])
+		for t in transitive or []:
+			self.extend(t)
+
+	def to_list(self):
+		return list(self)
+
+
 def struct(**k):
 	return types.SimpleNamespace(**k)
 
@@ -105,7 +119,12 @@ def fail(msg="", *a):
 
 
 def select(d, no_match_error=None):
-	"""select() on configuration settings: the one for our target, else the default."""
+	"""select() on configuration settings: the one for our target, else the default. Qualcomm's
+	socrepo_true/false choose between a 6.12-style soc-repo build and msm-kernel: these 6.6 sources
+	were built as msm-kernel ones (false)."""
+	for k, v in d.items():
+		if str(k).endswith("socrepo_false"):
+			return v
 	for k, v in d.items():
 		if TARGET in str(k) and VARIANT in str(k):
 			return v
@@ -146,28 +165,56 @@ def ddk_module(name, srcs=(), out=None, local_defines=None, copts=None, includes
 				if m:
 					conf[m.group(1)] = m.group(2).strip('"')
 					defs.append((m.group(1), m.group(2).strip('"')))
-	files = list(srcs or [])
-	for opt, branches in (conditional_srcs or {}).items():
-		on = conf.get(opt, "n") in ("y", "m")
-		files += branches.get(on, [])
-	ko, hd = [], []
-	for d in deps or ():
-		if d == "//msm-kernel:all_headers" or d.startswith("//msm-kernel"):
-			continue
-		dp, dn = label_to_path(pkg, d)
-		(hd if ("%s:%s" % (dp, dn)) in headers else ko).append("%s:%s" % (dp, dn))
-	modules.append({
-		"package": pkg, "name": name, "out": out or name + ".ko",
-		"srcs": [s for s in files if isinstance(s, str)],
-		"includes": list(includes or []), "linux_includes": list(linux_includes or []),
-		"local_defines": list(local_defines or []), "copts": list(copts or []),
-		"deps": ko,
-		"hdrs": ["%s:%s" % label_to_path(pkg, h) for h in (hdrs or []) if isinstance(h, str) and
-			(h.startswith(":") or h.startswith("//"))],
-		"kconfig": resolve_files(pkg, kconfig) if kconfig else [],
-		"defconfig": resolve_files(pkg, defconfig) if defconfig else [],
-		"defconfig_options": defs,
-	})
+	def record(name, out, srcs, conditional_srcs, deps, includes, linux_includes, local_defines,
+			copts, hdrs):
+		files = list(srcs or [])
+		for opt, branches in (conditional_srcs or {}).items():
+			on = conf.get(opt, "n") in ("y", "m")
+			files += branches.get(on, [])
+		ko = []
+		for d in deps or ():
+			if not isinstance(d, str) or d.startswith("//msm-kernel") or d.startswith("//soc-repo:all"):
+				continue
+			ko.append("%s:%s" % label_to_path(pkg, d))
+		modules.append({
+			"package": pkg, "name": name, "out": out or name + ".ko",
+			"srcs": [s for s in files if isinstance(s, str)],
+			"includes": list(includes or []), "linux_includes": list(linux_includes or []),
+			"local_defines": list(local_defines or []), "copts": list(copts or []),
+			"deps": ko,
+			"hdrs": ["%s:%s" % label_to_path(pkg, h) for h in (hdrs or []) if isinstance(h, str) and
+				(h.startswith(":") or h.startswith("//"))],
+			"kconfig": resolve_files(pkg, kconfig) if kconfig else [],
+			"defconfig": resolve_files(pkg, defconfig) if defconfig else [],
+			"defconfig_options": defs,
+		})
+
+	# Qualcomm's techpacks (video, EVA, SPU ...) make their modules as ddk_submodules of one
+	# ddk_module: each submodule is a module of its own, with the parent's settings added
+	subs = [SUBS[k] for k in ("%s:%s" % label_to_path(pkg, d) for d in deps or () if isinstance(d, str))
+		if k in SUBS]
+	for sm in subs:
+		record(sm["name"], sm["out"], list(sm["srcs"]) + list(srcs or []),
+			dict(sm["conditional_srcs"] or {}, **(conditional_srcs or {})),
+			[d for d in list(sm["deps"]) + list(deps or ()) if not (isinstance(d, str) and
+				"%s:%s" % label_to_path(pkg, d) in SUBS)],
+			list(sm["includes"] or []) + list(includes or []), linux_includes,
+			list(sm["local_defines"] or []) + list(local_defines or []),
+			list(sm["copts"] or []) + list(copts or []), hdrs)
+	if not subs:
+		record(name, out, srcs, conditional_srcs, deps, includes, linux_includes, local_defines,
+			copts, hdrs)
+
+
+SUBS = {}
+
+
+def ddk_submodule(name, srcs=(), out=None, deps=(), local_defines=(), copts=(), includes=(),
+		conditional_srcs=None, **kw):
+	SUBS["%s:%s" % (CUR["pkg"], name)] = {"name": name, "out": out or name + ".ko",
+		"srcs": list(srcs or []), "deps": list(deps or []), "local_defines": list(local_defines or []),
+		"copts": list(copts or []), "includes": list(includes or []),
+		"conditional_srcs": conditional_srcs}
 
 
 def resolve_files(pkg, x):
@@ -194,6 +241,15 @@ def ddk_headers(name, hdrs=(), includes=(), linux_includes=(), **kw):
 
 
 CUR = {"pkg": ""}
+LISTING, LISTSET, RX = {}, {}, {}
+
+
+def rx(pat):
+	"""a glob pattern as a regular expression; Bazel's ** matches any number of directories."""
+	if pat not in RX:
+		RX[pat] = re.compile(re.escape(pat).replace(r"\*\*/", "(?:.*/)?").replace(r"\*\*", ".*")
+			.replace(r"\*", "[^/]*").replace(r"\?", "[^/]"))
+	return RX[pat]
 PKG_CONF = {}
 CACHE = {}
 
@@ -205,6 +261,7 @@ def shim_modules():
 		contains=lambda s, x: x in s)
 	return {
 		"//build/kernel/kleaf:kernel.bzl": {"ddk_module": ddk_module, "ddk_headers": ddk_headers,
+			"ddk_submodule": ddk_submodule,
 			"kernel_module": noop, "kernel_module_group": noop, "ddk_config": noop,
 			"kernel_modules_install": noop},
 		"//build/kernel/kleaf:hermetic_tools.bzl": {"hermetic_genrule": noop, "hermetic_exec": noop},
@@ -216,6 +273,8 @@ def shim_modules():
 		"@bazel_skylib//lib:paths.bzl": {"paths": paths},
 		"@bazel_skylib//lib:sets.bzl": {"sets": sets},
 		"@bazel_skylib//rules:write_file.bzl": {"write_file": noop},
+		"@bazel_skylib//rules:common_settings.bzl": {"bool_flag": noop, "string_flag": noop,
+			"int_flag": noop, "string_list_flag": noop, "BuildSettingInfo": noop},
 	}
 
 
@@ -234,7 +293,7 @@ def builtins_for(pkg):
 		"True": True, "False": False, "None": None, "print": lambda *a, **k: None,
 		"ddk_module": ddk_module, "ddk_headers": ddk_headers,
 		"visibility": noop, "rule": rule, "attr": Anything(), "provider": lambda *a, **k: noop,
-		"DefaultInfo": noop, "depset": lambda *a, **k: [], "Label": lambda x: x, "type": startype,
+		"DefaultInfo": noop, "depset": Depset, "Label": lambda x: x, "type": startype,
 	}
 
 

@@ -30,21 +30,33 @@ rm -rf "$W" "$OUTM" "$LOG" && mkdir -p "$T/vendor" "$W/obj" "$W/inc/soc/oplus" "
 CONF=$W/soc-autoconf.h
 soc_autoconf "$CONF"
 
-# 1. OnePlus' definitions
-python3 -I "$ROOT/scripts/bzl_eval.py" "$SRC" "$W/modules.json" vendor/oplus
+# 1. the definitions: OnePlus' own, and Qualcomm's techpacks as OnePlus 13's 6.6 tree has them
+# (audio, Wi-Fi, Bluetooth, camera, video, EVA, data/IPA, SPU, ...; their device trees aside).
+# build_tp.sh builds some of the techpacks already (from the SM8850 release): those modules are
+# skipped below, their headers still serve the others.
+QREPOS=$(cd "$SRC/vendor/qcom/opensource" && ls -d -- */ | tr -d / | grep -v -- '-devicetree$' | tr '\n' ' ')
+python3 -I "$ROOT/scripts/bzl_eval.py" "$SRC" "$W/modules.json" vendor/oplus \
+	$(for r in $QREPOS; do echo "vendor/qcom/opensource/$r"; done)
 
 # 2. the build copy: OnePlus' tree, the NFC chips' (ST, NXP) and OnePlus' NFC driver, which only the
 # SM8850 release has
 cp -r "$SRC/vendor/oplus" "$T/vendor/oplus"
 cp -r "$SRC/vendor/st" "$SRC/vendor/nxp" "$T/vendor/"
+mkdir -p "$T/vendor/qcom/opensource"
+for r in $QREPOS; do cp -r "$SRC/vendor/qcom/opensource/$r" "$T/vendor/qcom/opensource/"; done
 mkdir -p "$T/vendor/oplus8850/kernel" && cp -r "$ROOT/src/mods8850/vendor/oplus/kernel/nfc" "$T/vendor/oplus8850/kernel/"
 for d in "$T"/vendor/*; do
 	python3 -I "$REF/k618_fix618.py" "$d" | grep -v 'k618_fix618: 0 files changed' || true
 	python3 -I "$ROOT/scripts/oplus_fix.py" "$d"
 done
+for d in "$T"/vendor/qcom/opensource/*; do
+	python3 -I "$REF/k618_fix618.py" "$d" | grep -v 'k618_fix618: 0 files changed' || true
+done
+# the reference's 6.12 -> 6.18 techpack fixes (not its Xiaomi or 5.15 ones), as build_tp.sh
+python3 -I "$ROOT/scripts/tp_fix.py" "$REF" "$T/vendor/qcom/opensource"
 # trace headers name their directory from the kernel's include/trace, in OnePlus' tree layout
-grep -rlZ --include='*.h' -E 'define[[:space:]]+TRACE_INCLUDE_PATH[[:space:]]+[./]*vendor/oplus/' "$T/vendor/oplus" \
-	| xargs -0 -r sed -i -E "s#(define[[:space:]]+TRACE_INCLUDE_PATH[[:space:]]+)[./]*(vendor/oplus/)#\1$T/\2#"
+grep -rlZ --include='*.h' -E 'define[[:space:]]+TRACE_INCLUDE_PATH[[:space:]]+[./]*vendor/(oplus|qcom)/' "$T/vendor" \
+	| xargs -0 -r sed -i -E "s#(define[[:space:]]+TRACE_INCLUDE_PATH[[:space:]]+)[./]*(vendor/(oplus|qcom)/)#\1$T/\2#"
 # the charger's generated IC tables (its Bazel rule oplus_chg_ic_cfg runs this script), where its
 # header target (oplus_chg_v2_ic_cfg_headers) has them
 CHG=$T/vendor/oplus/kernel/charger/bazel
@@ -77,7 +89,7 @@ lnk linux/oplus_kevent.h "$K/secureguard/gki2.0/rootguard_new/oplus_kevent.h"
 ST=$ROOT/device/op13/stock
 python3 -I "$ROOT/scripts/vendor_kbuild.py" "$W/modules.json" "$T" \
 	"$ST/first_stage.load:$ST/vendor_dlkm.load:$ST/system_dlkm.load" \
-	"$ROOT/out/oplusmods:$ROOT/out/extramods" "$W/plan.txt"
+	"$ROOT/out/oplusmods:$ROOT/out/extramods:$ROOT/out/tpmods" "$W/plan.txt"
 
 # 4. build
 SYMS="$S/Module.symvers $(ls "$ROOT"/out/tp-log/*.symvers "$ROOT"/out/oplus/*/Module.symvers "$ROOT"/out/extra/*/Module.symvers 2>/dev/null | tr '\n' ' ')"
@@ -113,8 +125,8 @@ done < "$W/plan.txt"
 # options that switch its wanted modules on set to m (and defined for the C code)
 python3 -I "$ROOT/scripts/vendor_mkplan.py" "$T" \
 	"$ST/first_stage.load:$ST/vendor_dlkm.load:$ST/system_dlkm.load" \
-	"$ROOT/out/oplusmods:$ROOT/out/extramods:$OUTM" "$W/mkplan.txt" \
-	vendor/oplus vendor/st vendor/nxp vendor/oplus8850
+	"$ROOT/out/oplusmods:$ROOT/out/extramods:$ROOT/out/tpmods:$OUTM" "$W/mkplan.txt" \
+	vendor/oplus vendor/st vendor/nxp vendor/oplus8850 vendor/qcom/opensource
 while IFS='|' read -r dir opts names; do
 	tag=mk-$(echo "$dir" | tr '/' '_')
 	MO=$W/obj/$tag
