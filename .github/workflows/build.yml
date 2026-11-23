@@ -73,6 +73,10 @@ jobs:
         continue-on-error: true
         run: bash scripts/build_vendor.sh
 
+      - name: Try WALT on 6.18 (log only)
+        continue-on-error: true
+        run: bash scripts/try_walt.sh
+
       - name: Boot image
         id: bootimg
         continue-on-error: true
@@ -103,6 +107,7 @@ jobs:
           cp -r out/extra-log dist/logs/ 2>/dev/null || true
           mkdir -p dist/vendor && cp out/vendormods/*.ko dist/vendor/ 2>/dev/null || true
           cp -r out/vendor-log dist/logs/ 2>/dev/null || true
+          mkdir -p dist/logs/walt-try && cp out/walt-try/*.log dist/logs/walt-try/ 2>/dev/null || true
           cp out/vendor/modules.json out/vendor/plan.txt dist/logs/ 2>/dev/null || true
           cp -r out/boot/full dist/logs/full-lists 2>/dev/null || true
           cp out/*.log out/*.txt dist/logs/ 2>/dev/null || true
