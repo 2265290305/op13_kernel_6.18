@@ -12,6 +12,10 @@ OUTM=$ROOT/out/oplusmods
 LOG=$ROOT/out/oplus-log
 [ -f "$S/Module.symvers" ] || { echo "build_oplus: build the SoC modules first"; exit 1; }
 rm -rf "$W" "$OUTM" && mkdir -p "$W/inc/soc/oplus" "$OUTM" "$LOG"
+# the SoC configuration, forced in as for the techpacks (env.sh: without it the SoC headers' stubs
+# replace real calls)
+CONF=$W/soc-autoconf.h
+soc_autoconf "$CONF"
 # OnePlus' headers by the paths its kernel tree has them at
 ln -s "$SRC/include" "$W/inc/soc/oplus/boot"
 ln -s "$SRC/include" "$W/inc/soc/oplus/system"
@@ -40,13 +44,24 @@ for entry in "${SETS[@]}"; do
 	set +e
 	# shellcheck disable=SC2086
 	"${KMAKE[@]}" M="$W/$name" modules -j"$J" KBUILD_EXTRA_SYMBOLS="$SYMS" \
-		NOSTDINC_FLAGS="-nostdinc -I$S/include -I$W/inc" KCFLAGS="-Wno-error $defs" $vars > "$LOG/$name.log" 2>&1
+		NOSTDINC_FLAGS="-nostdinc -I$S/include -I$W/inc" KCFLAGS="-Wno-error -include $CONF $defs" $vars > "$LOG/$name.log" 2>&1
 	rc=$?
 	set -e
 	echo "build_oplus: $name: make exit $rc, $(find "$W/$name" -name '*.ko' | wc -l) modules"
 	if [ $rc -ne 0 ]; then
 		bad=$((bad + 1))
 		grep -E ': (fatal )?error: |^ERROR: modpost' "$LOG/$name.log" | sed -E "s|$W/||" | head -8 || true
+		continue
+	fi
+	# a source that calls into smem must import it: an inline stub there is the test-31 crash
+	stub=
+	for ko in $(find "$W/$name" -name '*.ko'); do
+		grep -rqs 'qcom_smem_get' "$W/$name" --include='*.c' || break
+		llvm-nm -u "$ko" | grep -q qcom_smem_get || stub="$stub $(basename "$ko")"
+	done
+	if [ -n "$stub" ]; then
+		echo "build_oplus: $name: built against the smem stub:$stub"
+		bad=$((bad + 1))
 		continue
 	fi
 	ok=$((ok + 1))

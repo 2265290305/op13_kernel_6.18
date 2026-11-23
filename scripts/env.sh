@@ -23,3 +23,16 @@ export KBUILD_BUILD_HOST=build-host KBUILD_BUILD_USER=build-user KBUILD_BUILD_VE
 export KBUILD_BUILD_TIMESTAMP="Sat Nov 21 00:00:00 UTC 2026"
 # LOCALVERSION= (set, empty): the release is 6.18.<n> + CONFIG_LOCALVERSION, nothing appended
 KMAKE=(make -C "$C" O="$O" ARCH=arm64 LLVM=1 LLVM_IAS=1 LOCALVERSION=)
+
+# soc_autoconf OUT: the vendor configuration as code built outside the SoC tree must see it -- the SoC
+# build's evaluated options (src/soc/gen/autoconf_vendor.h; the kernel's own autoconf.h has none of
+# them), less the other chipsets' selectors and less KGSL's own governors (KGSL builds those itself).
+# Every build against the SoC headers needs it forced in: those headers turn functions into inline
+# stubs when an option looks off (smem.h's qcom_smem_get() then "returns" 0x13, and OnePlus'
+# project info crashed reading it, test-31).
+soc_autoconf() {
+	awk '/^#ifndef CONFIG_ARCH_/ && $2 != "CONFIG_ARCH_SUN" { skip = 3 }
+	     /^#ifndef CONFIG_DEVFREQ_GOV_QCOM_(ADRENO_TZ|GPUBW_MON)(_MODULE)?$/ { skip = 3 }
+	     skip { skip--; next } { print }' "$S/gen/autoconf_vendor.h" > "$1"
+	grep -q 'CONFIG_ARCH_SUN' "$1" || { echo "soc_autoconf: CONFIG_ARCH_SUN is not in the SoC configuration"; return 1; }
+}

@@ -19,6 +19,9 @@ LOG=$ROOT/out/extra-log
 [ -f "$S/Module.symvers" ] || { echo "build_extra: build the SoC modules first"; exit 1; }
 rm -rf "$W" "$OUTM" && mkdir -p "$W/inc/soc/oplus/dft" "$OUTM" "$LOG"
 # the headers by the paths OnePlus' Bazel build gives them (<soc/oplus/...>)
+# the SoC configuration, forced in as for the techpacks (env.sh)
+CONF=$W/soc-autoconf.h
+soc_autoconf "$CONF"
 ln -s "$SRC/boot/include" "$W/inc/soc/oplus/system"
 ln -s "$SRC/boot/include" "$W/inc/soc/oplus/boot"
 ln -s "$SRC/dft/include/olc.h" "$W/inc/soc/oplus/dft/olc.h"
@@ -61,7 +64,7 @@ for entry in "${SETS[@]}"; do
 	} > "$D/Kbuild"
 	set +e
 	"${KMAKE[@]}" M="$D" modules -j"$J" KBUILD_EXTRA_SYMBOLS="$SYMS" \
-		NOSTDINC_FLAGS="-nostdinc -I$S/include -I$W/inc" KCFLAGS="-Wno-error" > "$LOG/$name.log" 2>&1
+		NOSTDINC_FLAGS="-nostdinc -I$S/include -I$W/inc" KCFLAGS="-Wno-error -include $CONF" > "$LOG/$name.log" 2>&1
 	rc=$?
 	set -e
 	if [ $rc -ne 0 ] || [ ! -f "$D/$name.ko" ]; then

@@ -31,7 +31,10 @@ RAMOOPS="op13_ramoops=0x240000@0x880000000 ramoops.mem_address=0x880000000 ramoo
 # its plain reset keeps the RAM (the log survived it). loglevel=7: the bootloader passes loglevel=6,
 # which keeps KERN_INFO -- most of the log -- off the consoles, ramoops' among them.
 RAMOOPS="$RAMOOPS loglevel=7"
-BASE="printk.devkmsg=on log_buf_len=16M sysctl.kernel.panic_on_oops=0 sysctl.kernel.printk=1 panic=5 initcall_blacklist=qcom_geni_serial_init android_arch_task_struct_size=1024 sched_proxy_exec=0 erofs.reserved_pages=64 restrict_cma_redirect=false sysctl.kernel.sched_util_clamp_min_rt_default=0 $RAMOOPS"
+# No sysctl.kernel.printk=1 (the reference has it): applied just before init runs (~0.74 s), it took
+# the console level to 1 and left only KERN_EMERG -- k618_load and oopses -- in the pstore log from
+# then on (test-15 to test-31: every driver and init message after 0.74 s was missing)
+BASE="printk.devkmsg=on log_buf_len=16M sysctl.kernel.panic_on_oops=0 panic=5 initcall_blacklist=qcom_geni_serial_init android_arch_task_struct_size=1024 sched_proxy_exec=0 erofs.reserved_pages=64 restrict_cma_redirect=false sysctl.kernel.sched_util_clamp_min_rt_default=0 $RAMOOPS"
 # the full image: modules that do not load are logged, and no zygote after 3 minutes ends the boot
 # with the blocked tasks in the log (tools/prep_common.sh, op13_deadline). panic=0 (after BASE's
 # panic=5, so it wins): the kernel stops there instead of restarting -- the phone's own restart is a
@@ -39,8 +42,12 @@ BASE="printk.devkmsg=on log_buf_len=16M sysctl.kernel.panic_on_oops=0 sysctl.ker
 # op13_hold_reboot=1: so does a restart userspace asks for (test-23 went to recovery after ~15 s):
 # held, with its log kept for the button reset (tools/prep_common.sh)
 # driver_async_probe: the touch screen's drivers (scripts/build_extra.sh) probe in the background, so
-# the batch loader does not wait on a touch controller that takes long or never answers
-CMDLINE=${CMDLINE:-op13_modload_tolerate=1 op13_deadline=180 op13_hold_reboot=1 driver_async_probe=synaptics_tcm_spi,synaptics_tcm_hbp $BASE panic=0}
+# the batch loader does not wait on a touch controller that takes long or never answers. That alone
+# was not enough: loading a module ends with async_synchronize_full(), so the batch still waited on
+# that background probe, and when it oopsed (test-31) the boot stopped there for good.
+# oplus_bsp_synaptics_tcm2.async_probe=1 (k618_load hands it to the module) sets the module's
+# async_probe_requested, which skips that wait
+CMDLINE=${CMDLINE:-op13_modload_tolerate=1 op13_deadline=180 op13_hold_reboot=1 driver_async_probe=synaptics_tcm_spi,synaptics_tcm_hbp oplus_bsp_synaptics_tcm2.async_probe=1 $BASE panic=0}
 [ -f "$O/Module.symvers" ] || { echo "build_bootimg: build the kernel first"; exit 1; }
 # an image without the SoC modules cannot get past the first stage: none at all, rather than one
 # that only looks testable

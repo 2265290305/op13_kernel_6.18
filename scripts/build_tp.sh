@@ -70,13 +70,9 @@ REPOS=(
 	# OnePlus 13's own 6.6 tree; left out until they are brought over (not needed to boot)
 )
 
-# The vendor configuration as the techpacks see it: the SoC build's evaluated options, less the
-# other chipsets' selectors and less KGSL's own governors (KGSL builds those itself)
+# The vendor configuration as the techpacks see it (env.sh)
 TPCONF=$ROOT/out/tp-autoconf.h
-awk '/^#ifndef CONFIG_ARCH_/ && $2 != "CONFIG_ARCH_SUN" { skip = 3 }
-     /^#ifndef CONFIG_DEVFREQ_GOV_QCOM_(ADRENO_TZ|GPUBW_MON)(_MODULE)?$/ { skip = 3 }
-     skip { skip--; next } { print }' "$S/gen/autoconf_vendor.h" > "$TPCONF"
-grep -q 'CONFIG_ARCH_SUN' "$TPCONF" || { echo "build_tp: CONFIG_ARCH_SUN is not in the SoC configuration"; exit 1; }
+soc_autoconf "$TPCONF"
 
 SYMS=$S/Module.symvers
 addsym() { case " $SYMS " in *" $1 "*) ;; *) SYMS="$SYMS $1";; esac; }
