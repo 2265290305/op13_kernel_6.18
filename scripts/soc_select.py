@@ -6,6 +6,11 @@
       system_dlkm) and whose option the evaluated configuration enables -- less the ones the kernel
       build already makes (its option set in the kernel's own .config, or a .ko of the same name:
       zram, zsmalloc, the DRM display helpers ...), less the dropped ones and whatever needs them
+  wantopts <soc> <stock dir> <gki modules dir>
+      the options of the registry modules the phone's lists load that the kernel build does not
+      make -- to be set to m on top of sun_perf, whose own choice leaves ~25 of them off
+  forced <soc> <options file>
+      the modules those options (lines "CONFIG_X=m") make: registry name, tab, .ko name
   owners <soc> <build log>
       the registry modules that own the files with compile errors, or that modpost refused
 
@@ -68,6 +73,27 @@ def select(soc, evaluated, kernel, stock, gki, drop_file):
     return 0
 
 
+def wantopts(soc, stock, gki):
+    _kb, mods = registry(soc)
+    wanted = set()
+    for lst in ("first_stage.load", "vendor_dlkm.load", "system_dlkm.load"):
+        wanted |= {canon(line) for line in open(os.path.join(stock, lst)) if line.strip()}
+    own = set()
+    for dp, _dn, fns in os.walk(gki):
+        own |= {canon(f) for f in fns if f.endswith(".ko")}
+    opts = sorted({m["config"] for m in mods.values()
+                   if m["config"] and canon(m["out"]) in wanted and canon(m["out"]) not in own})
+    print("\n".join(opts))
+    return 0
+
+
+def forced(soc, opts_file):
+    _kb, mods = registry(soc)
+    opts = {line.split("=")[0].strip() for line in open(opts_file) if line.strip()}
+    print("\n".join(sorted({m["name"] + "\t" + canon(m["out"]) for m in mods.values() if m["config"] in opts})))
+    return 0
+
+
 def owners(soc, log):
     _kb, mods = registry(soc)
     by_src, by_out = {}, {}
@@ -105,6 +131,10 @@ def owners(soc, log):
 def main(argv):
     if argv[1] == "select":
         return select(*argv[2:8])
+    if argv[1] == "wantopts":
+        return wantopts(*argv[2:5])
+    if argv[1] == "forced":
+        return forced(argv[2], argv[3])
     if argv[1] == "owners":
         return owners(argv[2], argv[3])
     print(__doc__)

@@ -98,10 +98,12 @@ echo "build_bootimg: $vendor_n vendor modules, $gki_n of the kernel's own"
 
 # the kernel's built-in module lists: modprobe takes a dependency on a built-in driver as met
 cp "$O/modules.builtin" "$O/modules.builtin.modinfo" "$T/mods/lib/modules/$REL/"
-# the drivers scripts/build_vendor.sh brought over (mklists.py loads them last); one whose symbol
-# versions differ is left out with what needs it, instead of costing the image (below)
+# the drivers new to the boot -- those scripts/build_vendor.sh brought over and the SoC modules
+# built only since build_soc.sh sets the options sun_perf leaves off (out/soc-forced.txt): in
+# boot.img's layer unloaded, loaded last in boot-full.img's (mklists.py). One whose symbol versions
+# differ is left out with what needs it, instead of costing the image (below)
 NEW=$B/vendormods.list
-cp "$ROOT/out/vendormods.list" "$NEW" 2>/dev/null || : > "$NEW"
+cat "$ROOT/out/vendormods.list" "$ROOT/out/soc-forced.txt" 2>/dev/null | sort -u > "$NEW" || : > "$NEW"
 for try in 1 2 3 4; do
 	rm -rf "$T/rd/lib/modules" && mkdir -p "$T/rd/lib/modules"
 	depmod -b "$T/mods" -F "$O/System.map" -e "$REL" 2> "$B/depmod.err" || true

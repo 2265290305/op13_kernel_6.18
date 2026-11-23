@@ -5,7 +5,7 @@
 #
 # Which modules: the ones the phone's own lists load (scripts/soc_select.py). A module that does
 # not compile (or that modpost refuses) is dropped with whatever needs it and the rest built again,
-# up to six rounds -- one error anywhere would otherwise stop modpost for every module. What was
+# up to ten rounds -- one error anywhere would otherwise stop modpost for every module. What was
 # dropped is in out/soc-dropped.txt, the last round's log in out/soc-build.log.
 set -e
 . "$(dirname "$0")/env.sh"
@@ -24,6 +24,19 @@ python3 -I "$REF/k618_soc_kbuild.py" copies "$S" "$C"
 grep -v 'drivers/power/oplus/Kconfig' "$S/Kconfig.msm" > "$S/gen/Kconfig.msm"
 KCONFIG_EXT_PREFIX=$S/ "$S/flatten_kconfig.sh" "$S/gen/Kconfig.msm" > "$S/gen/Kconfig.ext"
 python3 -I "$REF/k618_soc_kbuild.py" fragment "$S" "$S/$CFG" > "$S/gen/fragment.config"
+# every module the phone loads, also those sun_perf leaves off: their options to m on top (Kconfig
+# keeps an option off whose dependencies are not met). Those that were off are new to the boot:
+# out/soc-forced.txt lists them for build_bootimg.sh (boot.img leaves them unloaded)
+python3 -I "$ROOT/scripts/soc_select.py" wantopts "$S" "$ROOT/device/op13/stock" "$ROOT/out/gki-staging" \
+	> "$ROOT/out/soc-wantopts.txt"
+cp "$S/gen/fragment.config" "$S/gen/fragment-sun_perf.config"
+# (not those this port's overrides turn off on purpose: configs/op13_overrides.bzl says why)
+while read -r opt; do
+	grep -qE "\"$opt\": *\"n\"" "$ROOT/configs/op13_overrides.bzl" && continue
+	grep -qE "^$opt=[ym]" "$S/gen/fragment-sun_perf.config" || echo "$opt=m"
+done < "$ROOT/out/soc-wantopts.txt" > "$ROOT/out/soc-forced-opts.txt"
+cat "$ROOT/out/soc-forced-opts.txt" >> "$S/gen/fragment.config"
+echo "build_soc: $(grep -c . "$ROOT/out/soc-forced-opts.txt") options the phone's modules need set to m beyond sun_perf"
 ok=
 for try in $(seq 1 40); do
 	cat "$O/.config" "$S/gen/fragment.config" > "$KC/.config"
@@ -36,7 +49,7 @@ done
 [ -n "$ok" ] || { echo "build_soc: kconfig still failing after $try tries"; exit 1; }
 DROP=$ROOT/out/soc-dropped.txt
 : > "$DROP"
-for round in 1 2 3 4 5 6; do
+for round in $(seq 1 10); do
 	python3 -I "$ROOT/scripts/soc_select.py" select "$S" "$KC/.config" "$O/.config" "$ROOT/device/op13/stock" \
 		"$ROOT/out/gki-staging" "$DROP" > "$ROOT/out/soc-selected.txt"
 	# shellcheck disable=SC2046
@@ -58,5 +71,24 @@ $(find "$S" -name '*.ko' | wc -l) of $(grep -c '^obj-m' "$S/Kbuild")"
 	echo "build_soc: dropping: $(echo $new)"
 	echo "$new" >> "$DROP"
 done
+# the modules built only because of those options
+python3 -I "$ROOT/scripts/soc_select.py" forced "$S" "$ROOT/out/soc-forced-opts.txt" > "$ROOT/out/soc-forced-mods.txt"
+cut -f2 "$ROOT/out/soc-forced-mods.txt" > "$ROOT/out/soc-forced.txt"
+# still failing: without any of them, as before they were added -- the boot image needs this build
+if [ $rc -ne 0 ] && [ -s "$ROOT/out/soc-forced-mods.txt" ]; then
+	echo "build_soc: still failing; once more without the modules beyond sun_perf"
+	cut -f1 "$ROOT/out/soc-forced-mods.txt" >> "$DROP"
+	python3 -I "$ROOT/scripts/soc_select.py" select "$S" "$KC/.config" "$O/.config" "$ROOT/device/op13/stock" \
+		"$ROOT/out/gki-staging" "$DROP" > "$ROOT/out/soc-selected.txt"
+	# shellcheck disable=SC2046
+	python3 -I "$REF/k618_soc_kbuild.py" kbuild "$S" "$KC/.config" "$O/.config" $(cat "$ROOT/out/soc-selected.txt")
+	find "$S" -name '*.ko' -delete
+	set +e
+	"${KMAKE[@]}" M="$S" -k -j"$J" modules > "$LOG" 2>&1
+	rc=$?
+	set -e
+	echo "build_soc: fallback round: make exit $rc, modules built: $(find "$S" -name '*.ko' | wc -l)"
+	: > "$ROOT/out/soc-forced.txt"
+fi
 echo "build_soc: dropped $(grep -c . "$DROP") modules: $(cat "$DROP" | xargs -n1 basename 2> /dev/null | tr '\n' ' ')"
 exit $rc
