@@ -56,7 +56,7 @@ CMDLINE=${CMDLINE:-op13_modload_tolerate=1 op13_deadline=180 op13_hold_reboot=1 
 rm -rf "$B" && mkdir -p "$T/rd/lib/modules" "$T/mods/lib/modules/$REL/kernel" "$B/helpers"
 
 # the batch loader (a module) and its helper (a static program: the first-stage ramdisk has no libc)
-# (k618_probe: the reference's log writer, loaded only by boot-rawlog.img -- see below)
+# (k618_probe: the reference's log writer, first in both images' first stage -- see below)
 cp "$ROOT/modules/k618_load.c" "$ROOT/modules/k618_probe.c" "$B/helpers/"
 echo "obj-m += k618_load.o k618_probe.o" > "$B/helpers/Kbuild"
 "${KMAKE[@]}" M="$B/helpers" modules > "$B/helpers/build.log" 2>&1 || { tail -20 "$B/helpers/build.log"; exit 1; }
@@ -143,14 +143,23 @@ for try in 1 2 3 4; do
 	[ $try = 4 ] && { echo "build_bootimg: symbol versions still differ: no image"; exit 1; }
 done
 
-# boot-rawlog.img: the same layer, plus the reference's log writer (k618_probe, in no list of
-# boot.img's) first in the first stage. It writes the kernel log onto the partition named rawdump
-# -- only one whose partition-table name is that -- every 2 s, before every module of the batch
-# (k618_load calls its flush) and from the panic notifier: two whole copies in turns and a 16 MB
-# ring, 28 MB from the partition's start, which a write cannot leave. For a boot whose RAM log does
-# not survive the reset; read back with: dd if=/dev/block/by-name/rawdump bs=1M count=28.
-cp -a "$T/rd" "$T/rd-rawlog"
-python3 -I - "$T/rd-rawlog/lib/modules" <<'PY'
+# boot-full.img: boot.img's layer with every driver build_vendor.sh brought over loaded too -- at the
+# end of the batch, probing in the background (mklists.py). Apart, so a new driver that hangs in its
+# init cannot cost the boot test.
+cp -a "$T/rd" "$T/rd-full"
+mkdir -p "$B/full"
+python3 -I "$ROOT/scripts/mklists.py" "$T/rd-full/lib/modules" "$ST" "$B/full" "$NEW"
+
+# Both images: the reference's log writer (k618_probe) first in the first stage. It writes the
+# kernel log onto the partition named rawdump -- only one whose partition-table name is that -- every
+# 2 s, before every module of the batch (k618_load calls its flush) and from the panic notifier: two
+# whole copies in turns and a 16 MB ring, 28 MB from the partition's start, which a write cannot
+# leave. The whole log from 0 s: pstore's console (256 KB, the stock kernel's layout) keeps only its
+# last ~80 s now that nothing is filtered (test-40's began at 2.35 s). Read back on the stock kernel:
+# dd if=/dev/block/by-name/rawdump bs=1M count=28 (ref_8550/kernel-6.18/k618_rdread.py).
+# (boot-rawlog.img, the image that had it alone, is no more.)
+add_logwriter() {
+	python3 -I - "$1/lib/modules" <<'PY'
 import sys
 d = sys.argv[1]
 load = open(f"{d}/modules.load").read().split()
@@ -164,18 +173,13 @@ open(f"{d}/modules.options", "a").write(
     "log_poll_ms=20 log_every_ms=2000 log_slot_kb=4096 log_buf_kb=4096 "
     "log_ring_kb=16384 log_ring_ms=20 log_ring_keep_kb=4096 log_stall_ms=5000\n")
 PY
-
-# boot-full.img: boot.img's layer with every driver build_vendor.sh brought over loaded too -- at the
-# end of the batch, probing in the background (mklists.py). Apart, so a new driver that hangs in its
-# init cannot cost the boot test.
-cp -a "$T/rd" "$T/rd-full"
-mkdir -p "$B/full"
-python3 -I "$ROOT/scripts/mklists.py" "$T/rd-full/lib/modules" "$ST" "$B/full" "$NEW"
+}
+add_logwriter "$T/rd"
+add_logwriter "$T/rd-full"
 
 # the layer, built into the kernel: INITRAMFS_SOURCE set and the Image relinked (INITRAMFS_FORCE
 # stays off, or the phone's own ramdisks would not be unpacked at all)
 (cd "$T/rd" && find lib k618_umh | sort | cpio -o -H newc -R 0:0 --quiet) > "$B/initramfs.cpio"
-(cd "$T/rd-rawlog" && find lib k618_umh | sort | cpio -o -H newc -R 0:0 --quiet) > "$B/initramfs-rawlog.cpio"
 (cd "$T/rd-full" && find lib k618_umh | sort | cpio -o -H newc -R 0:0 --quiet) > "$B/initramfs-full.cpio"
 echo "build_bootimg: layer $(du -h "$B/initramfs.cpio" | cut -f1) uncompressed"
 cp "$O/Module.symvers" "$B/Module.symvers.before"
@@ -194,7 +198,6 @@ relink() {	# relink <initramfs> <image>
 	python3 "$ROOT/src/mkbootimg/mkbootimg.py" --header_version 4 --kernel "$O/arch/arm64/boot/Image" \
 		--cmdline "$CMDLINE" -o "$2"
 }
-relink "$B/initramfs-rawlog.cpio" "$B/boot-rawlog.img"
 relink "$B/initramfs-full.cpio" "$B/boot-full.img"
 relink "$B/initramfs.cpio" "$B/boot.img"
 # back to a kernel without the layer, so the next module build sees the configuration it expects

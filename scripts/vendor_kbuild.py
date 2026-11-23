@@ -130,7 +130,15 @@ for m in order:
 		elif val not in ("n", ""):
 			flags.append("-D%s=%s" % (opt, val if val.lstrip("-").isdigit() or val.startswith("0x")
 				else '\\"%s\\"' % val))
-	flags += [c for c in m["copts"] if isinstance(c, str)]
+	# Bazel's $(location ...) means nothing to make: such a copt goes, with the -include/-I before it
+	# (camera's generated banner header: its source has defaults when it is not there)
+	copts = [c for c in m["copts"] if isinstance(c, str)]
+	for i, c in enumerate(copts):
+		if "$(location" in c:
+			copts[i] = None
+			if i and copts[i - 1] in ("-include", "-I", "-isystem", "-iquote"):
+				copts[i - 1] = None
+	flags += [c for c in copts if c is not None]
 	with open(os.path.join(pkgdir, "Kbuild.%s" % base), "w") as k:
 		k.write("# from %s:%s (OnePlus' Bazel definition)\n" % (m["package"], m["name"]))
 		k.write("obj-m += %s.o\n" % base)

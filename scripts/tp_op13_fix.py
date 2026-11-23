@@ -3,6 +3,7 @@
 the reference's kalama build did not), applied after scripts/tp_fix.py. Idempotent."""
 
 import os
+import re
 import sys
 
 # (file, old, new)
@@ -39,9 +40,36 @@ EDITS = [
 ]
 
 
+def gpu_as_op13(root):
+    """The OnePlus 13's GPU (Adreno 830: gen8_0_1, Sun v2's DT; gen8_0_0 for v1) as the OnePlus 13's
+    own KGSL sets it up: without the GMU thermal mitigation, the thermal profile, the CLX table and
+    the no-fault-tolerance timeout the SM8850 release sends its GMU (OnePlus took them out for SM8750:
+    "bug:8274887"). test-40: the phone's GMU firmware answered the boot handshake with HFI error 115
+    (ResMgrCalibrate) and stopped acking, the GPU never came up, surfaceflinger kept dying."""
+    path = os.path.join(root, "graphics-kernel/adreno-gpulist.h")
+    if not os.path.exists(path):
+        return 0
+    text = open(path, encoding="utf-8", errors="surrogateescape").read()
+    n = 0
+
+    def fix(m):
+        nonlocal n
+        b = m.group(0)
+        b2 = b.replace("ADRENO_ACD | ADRENO_CLX | ADRENO_GMU_THERMAL_MITIGATION,", "ADRENO_ACD | ADRENO_CLX,")
+        b2 = re.sub(r"\n\t\.(cl_no_ft_timeout_ms|therm_profile|clx_tbl) = [^\n]*,", "", b2)
+        if b2 != b:
+            n += 1
+        return b2
+    text = re.sub(r"static const struct adreno_gen8_core adreno_gpu_core_gen8_0_[01] = \{.*?\n\};", fix, text,
+                  flags=re.S)
+    if n:
+        open(path, "w", encoding="utf-8", errors="surrogateescape", newline="").write(text)
+    return n
+
+
 def main(argv):
     root = argv[1]
-    n = 0
+    n = gpu_as_op13(root)
     for rel, old, new in EDITS:
         path = os.path.join(root, rel)
         if not os.path.exists(path):

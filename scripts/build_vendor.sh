@@ -183,9 +183,31 @@ PY
 		mkdir -p "$MO"
 		vars=; defs=
 		for o in $opts; do vars="$vars $o=m"; defs="$defs -D${o}_MODULE=1"; done
+		# the symbol versions of everything built so far, less those of the modules this directory
+		# makes itself (its Makefile may make again one built already: modpost refuses an export twice)
+		python3 -I - "$T/$dir" "$MO/extra.symvers" $SYMS <<'PY'
+import os, re, sys
+d, out, files = sys.argv[1], sys.argv[2], sys.argv[3:]
+mine = set()
+for f in ("Makefile", "Kbuild"):
+	p = os.path.join(d, f)
+	if os.path.isfile(p):
+		t = open(p, errors="ignore").read().replace("\\\n", " ")
+		for m in re.finditer(r"^\s*obj-\S*\s*[:+]?=\s*(.+)$", t, re.M):
+			mine |= {o[:-2].replace("-", "_") for o in m.group(1).split() if o.endswith(".o")}
+with open(out, "w") as w:
+	for f in files:
+		if not os.path.isfile(f):
+			continue
+		for line in open(f, errors="ignore"):
+			cols = line.rstrip("\n").split("\t")
+			if len(cols) > 2 and os.path.basename(cols[2]).replace("-", "_") in mine:
+				continue
+			w.write(line)
+PY
 		set +e
 		# shellcheck disable=SC2086
-		"${KMAKE[@]}" M="$T/$dir" MO="$MO" modules -j"$J" KBUILD_EXTRA_SYMBOLS="$SYMS" $vars \
+		"${KMAKE[@]}" M="$T/$dir" MO="$MO" modules -j"$J" KBUILD_EXTRA_SYMBOLS="$MO/extra.symvers" $vars \
 			NOSTDINC_FLAGS="-nostdinc -I$S/include -I$P/inc -idirafter $W/inc8750 -idirafter $C" \
 			KCFLAGS="-Wno-error -include $CONF $defs" > "$LOG/$tag.log" 2>&1
 		rc=$?

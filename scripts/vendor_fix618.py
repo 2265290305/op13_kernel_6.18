@@ -196,6 +196,80 @@ def fix_comp_alg(path, text):
 	return text
 
 
+def balanced_args(text, start):
+	"""the arguments of the call whose '(' is at start: (list of top-level argument strings, end)."""
+	depth, args, cur, i = 0, [], [], start
+	while i < len(text):
+		c = text[i]
+		if c == "(":
+			depth += 1
+			if depth == 1:
+				i += 1
+				continue
+		elif c == ")":
+			depth -= 1
+			if depth == 0:
+				args.append("".join(cur))
+				return args, i + 1
+		elif c == "," and depth == 1:
+			args.append("".join(cur))
+			cur = []
+			i += 1
+			continue
+		cur.append(c)
+		i += 1
+	return None, start
+
+
+def fix_assign_str(path, text):
+	"""__assign_str(dst) takes the field alone since 6.10 (the source is __string()'s)."""
+	out, pos = [], 0
+	for m in re.finditer(r"\b__assign_str\s*\(", text):
+		if m.start() < pos:
+			continue
+		args, end = balanced_args(text, m.end() - 1)
+		if not args or len(args) < 2:
+			continue
+		out.append(text[pos:m.start()] + "__assign_str(%s)" % args[0].strip())
+		pos = end
+	if not out:
+		return text
+	note(path, "__assign_str")
+	return "".join(out) + text[pos:]
+
+
+def const_param(text, names, pattern, repl):
+	"""in the definitions and prototypes of the named functions, pattern -> repl in the parameters."""
+	for name in names:
+		rx = re.compile(r"(\b%s\s*\()([^;{)]*\))" % re.escape(name))
+		text = rx.sub(lambda m: m.group(1) + re.sub(pattern, repl, m.group(2)), text)
+	return text
+
+
+def fix_callbacks(path, text):
+	orig = text
+	# bus_type.match takes a const struct device_driver (6.11)
+	names = set(re.findall(r"\.match\s*=\s*(\w+)\s*,", text))
+	text = const_param(text, names, r"(?<!const )\bstruct\s+device_driver\s*\*", "const struct device_driver *")
+	# snd_soc_dai_ops: set_channel_map's slot arrays and get_channel_map's dai are const (6.11)
+	names = set(re.findall(r"\.set_channel_map\s*=\s*(\w+)\s*,", text))
+	text = const_param(text, names, r"(?<!const )\bunsigned\s+int\s*\*", "const unsigned int *")
+	names = set(re.findall(r"\.get_channel_map\s*=\s*(\w+)\s*,", text))
+	text = const_param(text, names, r"^(\s*)(?<!const )struct\s+snd_soc_dai\s*\*", r"\1const struct snd_soc_dai *")
+	if text != orig:
+		note(path, "const callbacks")
+	return text
+
+
+# devm_gpio_request() is gone (6.17): the same through gpio_request() and a devres action
+DEVM_GPIO = (
+	"\n/* 6.18: devm_gpio_request() is gone (vendor_fix618.py) */\n"
+	"static void k618_devm_gpio_free(void *gpio)\n{\n\tgpio_free((unsigned long)gpio);\n}\n\n"
+	"static int k618_devm_gpio_request(struct device *dev, unsigned int gpio, const char *label)\n{\n"
+	"\tint rc = gpio_request(gpio, label);\n\n\tif (rc)\n\t\treturn rc;\n"
+	"\treturn devm_add_action_or_reset(dev, k618_devm_gpio_free, (void *)(unsigned long)gpio);\n}\n")
+
+
 def fix(path):
 	try:
 		text = open(path, encoding="utf-8", errors="surrogateescape").read()
@@ -233,7 +307,37 @@ def fix(path):
 		if text2 != text:
 			note(path, "css_tg")
 			text = text2
+	text = fix_assign_str(path, text)
+	# OnePlus' project info (get_eng_version, FACTORY, AGING ...) used where its header is included only
+	# under some option (Wi-Fi's cnss2/debug.h: inside IPC_LOGGING): included unconditionally too
+	if re.search(r"\bget_eng_version\s*\(", text) and "soc/oplus/system/oplus_project.h" in text \
+			and "/* k618: oplus_project.h */" not in text:
+		m = re.search(r"^#include\s*[<\"].*$", text, re.M)
+		if m:
+			text = text[:m.end()] + "\n#include <soc/oplus/system/oplus_project.h> /* k618: oplus_project.h */" + text[m.end():]
+			note(path, "oplus_project.h")
 	if path.endswith(".c"):
+		text = fix_callbacks(path, text)
+		if re.search(r"\bdevm_gpio_request\s*\(", text) and "k618_devm_gpio_request" not in text:
+			text = re.sub(r"\bdevm_gpio_request\s*\(", "k618_devm_gpio_request(", text)
+			if "linux/gpio.h" not in text:
+				text, _ = include_if(text, r".", "linux/gpio.h")
+			m = list(re.finditer(r"^#include\s*[<\"].*$", text, re.M))
+			at = m[-1].end() if m else 0
+			text = text[:at] + "\n" + DEVM_GPIO + text[at:]
+			note(path, "devm_gpio_request")
+		# struct thermal_zone_device is opaque outside drivers/thermal (6.x): its definition
+		if re.search(r"\bstruct\s+thermal_zone_device\b", text) and \
+				re.search(r"\b\w*tz\w*->(type|temperature|last_temperature|devdata|ops|tzp|mode|id|device)\b", text) and \
+				"thermal_core.h" not in text:
+			text, did = include_if(text, r".", "drivers/thermal/thermal_core.h")
+			if did:
+				note(path, "thermal_core.h")
+		# v4l2_ioctl_ops lost vidioc_g_ctrl/vidioc_s_ctrl (6.x: the control framework handles them)
+		text2 = re.sub(r"^[ \t]*\.vidioc_[gs]_ctrl\s*=\s*\w+\s*,[ \t]*\n", "", text, flags=re.M)
+		if text2 != text:
+			note(path, "v4l2 g/s_ctrl")
+			text = text2
 		text = fix_platform_remove(text, path)
 		# a function pointer to the snd_soc_unregister_component macro
 		if re.search(r"\bsnd_soc_unregister_component\b(?!\s*\()", text):
