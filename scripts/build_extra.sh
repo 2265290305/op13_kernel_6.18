@@ -24,7 +24,9 @@ ln -s "$SRC/boot/include" "$W/inc/soc/oplus/boot"
 ln -s "$SRC/dft/include/olc.h" "$W/inc/soc/oplus/dft/olc.h"
 ln -s "$SRC/device_info/device_info/bazel/device_info.h" "$W/inc/soc/oplus/device_info.h"
 ln -s "$SRC/touchpanel/touchpanel_notify/bazel/touchpanel_event_notify.h" "$W/inc/soc/oplus/touchpanel_event_notify.h"
-TPV2=$W/oplus_bsp_tp_custom	# oplus_touchscreen_v2's headers, which the Synaptics driver includes too
+# oplus_touchscreen_v2's headers, which the Synaptics driver includes too. Each copy keeps its source
+# directory's name: OnePlus' headers include one another by ../<that name>/...
+TPV2=$W/oplus_touchscreen_v2
 
 # name | directory | objects (module-y) | extra flags | modules it needs (of this list)
 SETS=(
@@ -43,17 +45,23 @@ for entry in "${SETS[@]}"; do
 	for n in $needs; do
 		case $failed in *" $n "*) echo "build_extra: $name: left out ($n failed)"; bad=$((bad + 1)); failed="$failed$name "; continue 2;; esac
 	done
-	cp -r "$SRC/$dir" "$W/$name"
-	python3 -I "$REF/k618_fix618.py" "$W/$name" | grep -v 'k618_fix618: 0 files changed' || true
-	python3 -I "$ROOT/scripts/oplus_fix.py" "$W/$name"
-	# its own directory first: the Synaptics driver has copies of oplus_touchscreen_v2's headers
-	printf 'obj-m += %s.o\n%s-y := %s\nccflags-y := -I$(src) %s\n' "$name" "$name" "$objs" "$defs" > "$W/$name/Kbuild"
+	D=$W/$(basename "$dir")
+	cp -r "$SRC/$dir" "$D"
+	python3 -I "$REF/k618_fix618.py" "$D" | grep -v 'k618_fix618: 0 files changed' || true
+	python3 -I "$ROOT/scripts/oplus_fix.py" "$D"
+	# its own directory first: the Synaptics driver has copies of oplus_touchscreen_v2's headers.
+	# A one-file module named as its file needs no object list (kbuild would take it as its own part)
+	{
+		echo "obj-m += $name.o"
+		[ "$objs" = "$name.o" ] || echo "$name-y := $objs"
+		echo "ccflags-y := -I\$(src) $defs"
+	} > "$D/Kbuild"
 	set +e
-	"${KMAKE[@]}" M="$W/$name" modules -j"$J" KBUILD_EXTRA_SYMBOLS="$SYMS" \
+	"${KMAKE[@]}" M="$D" modules -j"$J" KBUILD_EXTRA_SYMBOLS="$SYMS" \
 		NOSTDINC_FLAGS="-nostdinc -I$S/include -I$W/inc" KCFLAGS="-Wno-error" > "$LOG/$name.log" 2>&1
 	rc=$?
 	set -e
-	if [ $rc -ne 0 ] || [ ! -f "$W/$name/$name.ko" ]; then
+	if [ $rc -ne 0 ] || [ ! -f "$D/$name.ko" ]; then
 		echo "build_extra: $name: FAILED (make exit $rc)"
 		grep -E ': (fatal )?error: |^ERROR: modpost|WARNING: modpost: .*undefined' "$LOG/$name.log" | sed -E "s|$W/||" | head -12 || true
 		bad=$((bad + 1)); failed="$failed$name "
@@ -61,8 +69,8 @@ for entry in "${SETS[@]}"; do
 	fi
 	echo "build_extra: $name: built"
 	ok=$((ok + 1))
-	SYMS="$SYMS $W/$name/Module.symvers"
-	cp "$W/$name/$name.ko" "$OUTM/"
+	SYMS="$SYMS $D/Module.symvers"
+	cp "$D/$name.ko" "$OUTM/"
 done
 echo "build_extra: built $ok, failed $bad; modules: $(ls "$OUTM" | tr '\n' ' ')"
 [ "$bad" -eq 0 ]
