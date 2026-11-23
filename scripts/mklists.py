@@ -80,12 +80,17 @@ def main(argv):
             todo += deps.get(m, [])
 
     # new drivers the phone has in its first stage: to the batch (unless a first-stage one needs them)
+    # stock modules with no public source, skipped by decision (device/op13/no-source.txt)
+    nosrc_file = os.path.join(os.path.dirname(stock.rstrip("/")), "no-source.txt")
+    nosrc = {canon(l) for l in open(nosrc_file) if l.strip() and not l.startswith("#")} \
+        if os.path.isfile(nosrc_file) else set()
     wanted, missing_second = [m for m in moved if m not in in_init and not hold], []
     for lst in ("vendor_dlkm.load", "system_dlkm.load"):
         for n in read_list(f"{stock}/{lst}"):
             k = canon(n)
             if k not in have:
-                missing_second.append(os.path.basename(n))
+                if k not in nosrc:
+                    missing_second.append(os.path.basename(n))
             elif hold and k in new:
                 continue
             elif k not in blocked and have[k] not in in_init and have[k] not in wanted:

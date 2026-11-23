@@ -1,0 +1,21 @@
+# Stock modules with no public source (checked 2026-11-23: OnePlusOSS sm8750 modules repo, both
+# Android 16 OP13 branches, the OP13 6.6 vendor kernel, Nord 6 / Nord CE6 / Pad 4 / 15R module
+# repos, the 6.6 common kernel, GitHub-wide code search). Skipped by decision: none is needed to
+# boot (network/satellite extras, an MCU helper). scripts/mklists.py leaves them out of its
+# "second-stage modules we lack" count.
+oplus_network_702_satellite
+oplus_network_dns_cache
+oplus_network_dns_optimizer
+oplus_network_fast_bwe
+oplus_network_kernel_state_monitor
+oplus_network_satellite
+oplus_network_satellite_hl7603
+oplus_network_satellite_rpc
+oplus_network_satellite_rsmc
+oplus_network_sched
+oplus_network_sk_predict
+oplus_network_snapshot
+oplus_network_tcpdump_enhance
+oplus_network_vip_task
+oplus_icc_mcu
+inte
