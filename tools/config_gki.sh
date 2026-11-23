@@ -14,16 +14,18 @@ GKI_MODS="MTD MTD_BLKDEVS MTD_BLOCK MTD_OOPS MTD_BLOCK2MTD MTD_OF_PARTS QCOM_PMI
 	  UCSI_PMIC_GLINK USB_EHSET_TEST_FIXTURE IR_SPI IIO_BUFFER_CB
 	  TLS PTP_1588_CLOCK_KVM DRM_LONTIUM_LT9611UXC"
 # (atmel_mxt_ts and goodix_ts: the phone's are Qualcomm's touch-drivers techpack ones, build_vendor.sh)
-# and the ones only a selector reaches: usb_f_rndis (USB_CONFIGFS_RNDIS; built in, as the gadget
-# configfs is), snd-soc-hdmi-codec (the LT9611UXC bridge above) -- y or m
-GKI_SELECTED="USB_F_RNDIS SND_SOC_HDMI_CODEC"
+# and the ones only a selector reaches: snd-soc-hdmi-codec (the LT9611UXC bridge above) -- y or m.
+# Not usb_f_rndis: with the gadget configfs built in it can only be built in too, and Qualcomm's
+# usb_f_gsi (USB, adb) exports the same rndis_* functions -- modpost refused it and with it the whole
+# SoC build (run 45217710500). usb_f_gsi's RNDIS is the one this phone uses.
+GKI_SELECTED="SND_SOC_HDMI_CODEC"
 args=""
 for c in $GKI_MODS; do args="$args -m $c"; done
 # STATIC_USERMODEHELPER off: the reference's batch module loader is a usermode helper.
 # No debug info and genksyms CRCs: every module is rebuilt here, so CRCs only have to agree with
 # each other, and DWARF would cost several GB of disk. SHA-256 module signatures: hosts with a
 # strict crypto policy (RHEL 9) refuse to make SHA-1 ones.
-$C/scripts/config --file "$O/.config" $args -e USB_CONFIGFS_RNDIS -d STATIC_USERMODEHELPER \
+$C/scripts/config --file "$O/.config" $args -d STATIC_USERMODEHELPER \
 	-d DEBUG_INFO -d DEBUG_INFO_DWARF5 -d DEBUG_INFO_COMPRESSED_ZSTD -e DEBUG_INFO_NONE \
 	-d GENDWARFKSYMS -e GENKSYMS -d MODULE_SIG_SHA1 -e MODULE_SIG_SHA256 --set-val LOG_BUF_SHIFT 18 \
 	--set-str LOCALVERSION "$KNAME" -d LOCALVERSION_AUTO
