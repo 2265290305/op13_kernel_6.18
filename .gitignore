@@ -6,3 +6,4 @@
 /toolchain/
 /dist/
 *.img
+__pycache__/
