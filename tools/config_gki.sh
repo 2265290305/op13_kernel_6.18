@@ -12,9 +12,10 @@ $M gki_defconfig > "$O/../gki-config.log" 2>&1
 KNAME=-palaziks.ShiftPorts
 GKI_MODS="MTD MTD_BLKDEVS MTD_BLOCK MTD_OOPS MTD_BLOCK2MTD MTD_OF_PARTS QCOM_PMIC_GLINK
 	  UCSI_PMIC_GLINK USB_EHSET_TEST_FIXTURE IR_SPI IIO_BUFFER_CB
-	  TLS PTP_1588_CLOCK_KVM TOUCHSCREEN_ATMEL_MXT TOUCHSCREEN_GOODIX DRM_LONTIUM_LT9611UXC"
-# and the ones only a selector reaches: usb_f_rndis (USB_CONFIGFS_RNDIS), snd-soc-hdmi-codec
-# (the LT9611UXC bridge above)
+	  TLS PTP_1588_CLOCK_KVM DRM_LONTIUM_LT9611UXC"
+# (atmel_mxt_ts and goodix_ts: the phone's are Qualcomm's touch-drivers techpack ones, build_vendor.sh)
+# and the ones only a selector reaches: usb_f_rndis (USB_CONFIGFS_RNDIS; built in, as the gadget
+# configfs is), snd-soc-hdmi-codec (the LT9611UXC bridge above) -- y or m
 GKI_SELECTED="USB_F_RNDIS SND_SOC_HDMI_CODEC"
 args=""
 for c in $GKI_MODS; do args="$args -m $c"; done
@@ -30,8 +31,11 @@ $M olddefconfig >> "$O/../gki-config.log" 2>&1
 for c in GENKSYMS DEBUG_INFO_NONE MODULE_SIG_SHA256; do
 	grep -q "^CONFIG_$c=y" "$O/.config" || { echo "config_gki: CONFIG_$c did not take"; exit 1; }
 done
-for c in $GKI_MODS $GKI_SELECTED; do
+for c in $GKI_MODS; do
 	grep -q "^CONFIG_$c=m" "$O/.config" || { echo "config_gki: CONFIG_$c did not take"; exit 1; }
+done
+for c in $GKI_SELECTED; do
+	grep -qE "^CONFIG_$c=[ym]" "$O/.config" || { echo "config_gki: CONFIG_$c did not take"; exit 1; }
 done
 grep -q '^# CONFIG_STATIC_USERMODEHELPER is not set' "$O/.config" || { echo "config_gki: STATIC_USERMODEHELPER still on"; exit 1; }
 echo "config_gki: ok ($(grep '^CONFIG_MODULE_SIG_HASH' "$O/.config"))"

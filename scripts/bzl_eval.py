@@ -29,7 +29,7 @@ OUT = sys.argv[2]
 PKGS = sys.argv[3:]
 # the configuration these files are evaluated for: sun, perf, OnePlus' 6.6 kernel
 TARGET, VARIANT, KVER = "sun", "perf", "6.6"
-MACROS = os.path.join(ROOT, "kernel_platform/oplus/bazel")
+MACROS = os.environ.get("BZL_MACROS") or os.path.join(ROOT, "kernel_platform/oplus/bazel")
 # the kernel options conditional_srcs and select() test: the stock 6.6 configuration plus each
 # module's own defconfig (applied when the module is recorded)
 CONFIG = {}
@@ -273,6 +273,8 @@ def shim_modules():
 		"@bazel_skylib//lib:paths.bzl": {"paths": paths},
 		"@bazel_skylib//lib:sets.bzl": {"sets": sets},
 		"@bazel_skylib//rules:write_file.bzl": {"write_file": noop},
+		"@rules_pkg//pkg:install.bzl": {"pkg_install": noop},
+		"@rules_pkg//pkg:mappings.bzl": {"pkg_files": noop, "strip_prefix": Anything(), "pkg_filegroup": noop},
 		"@bazel_skylib//rules:common_settings.bzl": {"bool_flag": noop, "string_flag": noop,
 			"int_flag": noop, "string_list_flag": noop, "BuildSettingInfo": noop},
 	}
