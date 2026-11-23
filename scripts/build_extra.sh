@@ -49,6 +49,9 @@ for entry in "${SETS[@]}"; do
 	cp -r "$SRC/$dir" "$D"
 	python3 -I "$REF/k618_fix618.py" "$D" | grep -v 'k618_fix618: 0 files changed' || true
 	python3 -I "$ROOT/scripts/oplus_fix.py" "$D"
+	# trace headers name their directory from the kernel's include/trace, in OnePlus' tree layout
+	grep -rlZ "TRACE_INCLUDE_PATH.*vendor/oplus/kernel/$dir" "$D" | xargs -0 -r \
+		sed -i -E "s#(define[[:space:]]+TRACE_INCLUDE_PATH[[:space:]]+)[./]*vendor/oplus/kernel/$dir#\1$D#"
 	# its own directory first: the Synaptics driver has copies of oplus_touchscreen_v2's headers.
 	# A one-file module named as its file needs no object list (kbuild would take it as its own part)
 	{
