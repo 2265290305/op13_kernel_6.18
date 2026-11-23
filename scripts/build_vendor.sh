@@ -14,6 +14,8 @@
 #     the SoC configuration (forced in, env.sh) and the Module.symvers of everything built before it.
 #
 # A module that fails is left out with the ones that need it; the boot image is made without it.
+#  5. The stock modules OnePlus makes from plain Makefiles instead (scripts/vendor_mkplan.py): each
+#     directory built once with the options that switch them on.
 # Modules in out/vendormods (and their names in out/vendormods.list, for mklists.py: they load last,
 # probing in the background), a log each in out/vendor-log, the summary in out/vendor-log/summary.txt.
 set -e
@@ -31,10 +33,15 @@ soc_autoconf "$CONF"
 # 1. OnePlus' definitions
 python3 -I "$ROOT/scripts/bzl_eval.py" "$SRC" "$W/modules.json" vendor/oplus
 
-# 2. the build copy
+# 2. the build copy: OnePlus' tree, the NFC chips' (ST, NXP) and OnePlus' NFC driver, which only the
+# SM8850 release has
 cp -r "$SRC/vendor/oplus" "$T/vendor/oplus"
-python3 -I "$REF/k618_fix618.py" "$T/vendor/oplus" | grep -v 'k618_fix618: 0 files changed' || true
-python3 -I "$ROOT/scripts/oplus_fix.py" "$T/vendor/oplus"
+cp -r "$SRC/vendor/st" "$SRC/vendor/nxp" "$T/vendor/"
+mkdir -p "$T/vendor/oplus8850/kernel" && cp -r "$ROOT/src/mods8850/vendor/oplus/kernel/nfc" "$T/vendor/oplus8850/kernel/"
+for d in "$T"/vendor/*; do
+	python3 -I "$REF/k618_fix618.py" "$d" | grep -v 'k618_fix618: 0 files changed' || true
+	python3 -I "$ROOT/scripts/oplus_fix.py" "$d"
+done
 # trace headers name their directory from the kernel's include/trace, in OnePlus' tree layout
 grep -rlZ --include='*.h' -E 'define[[:space:]]+TRACE_INCLUDE_PATH[[:space:]]+[./]*vendor/oplus/' "$T/vendor/oplus" \
 	| xargs -0 -r sed -i -E "s#(define[[:space:]]+TRACE_INCLUDE_PATH[[:space:]]+)[./]*(vendor/oplus/)#\1$T/\2#"
@@ -102,6 +109,39 @@ while IFS='|' read -r name pkg base needs; do
 	SYMS="$SYMS $MO/Module.symvers"
 	cp "$MO/$base.ko" "$OUTM/"
 done < "$W/plan.txt"
+# 5. the stock modules OnePlus makes from plain Makefiles: each directory built once, with the
+# options that switch its wanted modules on set to m (and defined for the C code)
+python3 -I "$ROOT/scripts/vendor_mkplan.py" "$T" \
+	"$ST/first_stage.load:$ST/vendor_dlkm.load:$ST/system_dlkm.load" \
+	"$ROOT/out/oplusmods:$ROOT/out/extramods:$OUTM" "$W/mkplan.txt" \
+	vendor/oplus vendor/st vendor/nxp vendor/oplus8850
+while IFS='|' read -r dir opts names; do
+	tag=mk-$(echo "$dir" | tr '/' '_')
+	MO=$W/obj/$tag
+	mkdir -p "$MO"
+	vars=; defs=
+	for o in $opts; do vars="$vars $o=m"; defs="$defs -D${o}_MODULE=1"; done
+	set +e
+	# shellcheck disable=SC2086
+	"${KMAKE[@]}" M="$T/$dir" MO="$MO" modules -j"$J" KBUILD_EXTRA_SYMBOLS="$SYMS" $vars \
+		NOSTDINC_FLAGS="-nostdinc -I$S/include -I$W/inc" KCFLAGS="-Wno-error -include $CONF $defs" \
+		> "$LOG/$tag.log" 2>&1
+	rc=$?
+	set -e
+	for n in $names; do
+		ko=$(find "$MO" -name "$n.ko" -o -name "$(echo "$n" | tr '_' '-').ko" | head -1)
+		if [ -n "$ko" ]; then
+			echo "build_vendor: $n: built ($dir)" | tee -a "$LOG/summary.txt"
+			ok=$((ok + 1)); cp "$ko" "$OUTM/"
+		else
+			echo "build_vendor: $n: FAILED ($dir, make exit $rc)" | tee -a "$LOG/summary.txt"
+			bad=$((bad + 1))
+		fi
+	done
+	[ $rc -eq 0 ] || grep -E ': (fatal )?error: |^ERROR: modpost' "$LOG/$tag.log" | sed -E "s|$T/||" | head -6 \
+		| tee -a "$LOG/summary.txt" || true
+	[ -f "$MO/Module.symvers" ] && SYMS="$SYMS $MO/Module.symvers"
+done < "$W/mkplan.txt"
 ls "$OUTM" | sed 's/\.ko$//' > "$ROOT/out/vendormods.list"
 echo "build_vendor: built $ok, failed $bad" | tee -a "$LOG/summary.txt"
 [ "$bad" -eq 0 ]
