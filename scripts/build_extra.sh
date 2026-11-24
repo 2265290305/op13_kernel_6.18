@@ -27,6 +27,8 @@ ln -s "$SRC/boot/include" "$W/inc/soc/oplus/boot"
 ln -s "$SRC/dft/include/olc.h" "$W/inc/soc/oplus/dft/olc.h"
 ln -s "$SRC/device_info/device_info/bazel/device_info.h" "$W/inc/soc/oplus/device_info.h"
 ln -s "$SRC/touchpanel/touchpanel_notify/bazel/touchpanel_event_notify.h" "$W/inc/soc/oplus/touchpanel_event_notify.h"
+# the rest of what the SoC repo links into OnePlus' tree, from the OnePlus 13's (env.sh)
+oplus_overlay "$W/inc" "$ROOT/src/mods8750/vendor/oplus"
 # oplus_touchscreen_v2's headers, which the Synaptics driver includes too. Each copy keeps its source
 # directory's name: OnePlus' headers include one another by ../<that name>/...
 TPV2=$W/oplus_touchscreen_v2
@@ -64,7 +66,7 @@ for entry in "${SETS[@]}"; do
 	} > "$D/Kbuild"
 	set +e
 	"${KMAKE[@]}" M="$D" modules -j"$J" KBUILD_EXTRA_SYMBOLS="$SYMS" \
-		NOSTDINC_FLAGS="-nostdinc -I$S/include -I$W/inc" KCFLAGS="-Wno-error -include $CONF" > "$LOG/$name.log" 2>&1
+		NOSTDINC_FLAGS="-nostdinc -I$W/inc -I$S/include" KCFLAGS="-Wno-error -include $CONF" > "$LOG/$name.log" 2>&1
 	rc=$?
 	set -e
 	if [ $rc -ne 0 ] || [ ! -f "$D/$name.ko" ]; then

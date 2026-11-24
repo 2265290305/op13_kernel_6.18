@@ -43,3 +43,21 @@ soc_autoconf() {
 	     skip { skip--; next } { print }' "$S/gen/autoconf_vendor.h" > "$1"
 	grep -q 'CONFIG_ARCH_SUN' "$1" || { echo "soc_autoconf: CONFIG_ARCH_SUN is not in the SoC configuration"; return 1; }
 }
+
+# oplus_overlay DIR TREE: the SoC repo's include links into OnePlus' tree (include/soc/oplus/boot,
+# include/linux/sched_assist.h, ... -> ../vendor/oplus/...) made again in DIR, pointing into TREE
+# (a vendor/oplus directory) wherever TREE has the file and DIR has nothing at that path yet. The
+# SoC repo is the OnePlus 15's: since its links resolve (fetch.sh's vendor/oplus), code from the
+# OnePlus 13's tree got the OnePlus 15's oplus_project.h, sched_assist.h, ... ahead of its own
+# (projectinfo: "use of undeclared identifier 'PRE_EVB1'", and every module needing get_project).
+# DIR goes ahead of the SoC's include directory.
+oplus_overlay() {
+	local d=$1 t=$2 l rel
+	(cd "$S" && find include -type l -lname '*vendor/oplus/*') | while read -r l; do
+		rel=$(readlink "$S/$l"); rel=${rel#*vendor/oplus/}
+		[ -e "$t/$rel" ] || continue
+		[ -e "$d/${l#include/}" ] && continue
+		mkdir -p "$d/$(dirname "${l#include/}")"
+		ln -sfn "$t/$rel" "$d/${l#include/}"
+	done
+}

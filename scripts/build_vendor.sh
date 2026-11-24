@@ -124,6 +124,8 @@ prepare() {
 	# OnePlus' cpu tree as its kernel has it (kernel/oplus_cpu): includes of "../kernel/oplus_cpu/..."
 	# resolve from the include directory above
 	mkdir -p "$P/kernel" && ln -sfn "$K/cpu" "$P/kernel/oplus_cpu"
+	# and the rest of what the SoC repo links into OnePlus' tree, from this tree (env.sh)
+	oplus_overlay "$P/inc" "$T/vendor/oplus"
 }
 
 # build <pass dir> <wanted lists> <search dirs for Makefile-only modules...>
@@ -160,7 +162,7 @@ PY
 				MO=$P/obj/$name
 				mkdir -p "$MO"
 				"${KMAKE[@]}" M="$T/$pkg" MO="$MO" OPMOD="$base" modules -j1 KBUILD_EXTRA_SYMBOLS="$SYMS" \
-					NOSTDINC_FLAGS="-nostdinc -I$S/include -I$S/include/uapi -I$P/inc -idirafter $W/inc8750 -idirafter $C" \
+					NOSTDINC_FLAGS="-nostdinc -I$P/inc -I$S/include -I$S/include/uapi -idirafter $W/inc8750 -idirafter $C" \
 					KCFLAGS="-Wno-error -include $CONF" > "$LOG/$(basename "$P")-$name.log" 2>&1
 				echo "$? $MO/$base.ko" > "$MO/.result"
 			) < /dev/null &
@@ -219,7 +221,7 @@ PY
 		set +e
 		# shellcheck disable=SC2086
 		"${KMAKE[@]}" M="$T/$dir" MO="$MO" modules -j"$J" KBUILD_EXTRA_SYMBOLS="$MO/extra.symvers" $vars \
-			NOSTDINC_FLAGS="-nostdinc -I$S/include -I$S/include/uapi -I$P/inc -idirafter $W/inc8750 -idirafter $C" \
+			NOSTDINC_FLAGS="-nostdinc -I$P/inc -I$S/include -I$S/include/uapi -idirafter $W/inc8750 -idirafter $C" \
 			KCFLAGS="-Wno-error -include $CONF $defs" > "$LOG/$tag.log" 2>&1
 		rc=$?
 		set -e

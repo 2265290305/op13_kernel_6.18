@@ -19,6 +19,8 @@ soc_autoconf "$CONF"
 # OnePlus' headers by the paths its kernel tree has them at
 ln -s "$SRC/include" "$W/inc/soc/oplus/boot"
 ln -s "$SRC/include" "$W/inc/soc/oplus/system"
+# the rest of what the SoC repo links into OnePlus' tree, from the OnePlus 13's (env.sh)
+oplus_overlay "$W/inc" "$ROOT/src/mods8750/vendor/oplus"
 
 # name | directory | make variables | extra compiler flags
 SETS=(
@@ -44,7 +46,7 @@ for entry in "${SETS[@]}"; do
 	set +e
 	# shellcheck disable=SC2086
 	"${KMAKE[@]}" M="$W/$name" modules -j"$J" KBUILD_EXTRA_SYMBOLS="$SYMS" \
-		NOSTDINC_FLAGS="-nostdinc -I$S/include -I$W/inc" KCFLAGS="-Wno-error -include $CONF $defs" $vars > "$LOG/$name.log" 2>&1
+		NOSTDINC_FLAGS="-nostdinc -I$W/inc -I$S/include" KCFLAGS="-Wno-error -include $CONF $defs" $vars > "$LOG/$name.log" 2>&1
 	rc=$?
 	set -e
 	echo "build_oplus: $name: make exit $rc, $(find "$W/$name" -name '*.ko' | wc -l) modules"
