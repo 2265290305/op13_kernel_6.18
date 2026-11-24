@@ -678,6 +678,8 @@ def fix(path):
 		text = text2
 	# eventfd_signal() takes no count since 6.8 (it was 1)
 	text2 = re.sub(r"\beventfd_signal\(\s*([^,()]+?)\s*,\s*1\s*\)", r"eventfd_signal(\1)", text)
+	# ... and returns nothing: an assignment of its result gets what it returned, 1
+	text2 = re.sub(r"\b(\w+)\s*=\s*eventfd_signal\(([^;]+?)\)\s*;", r"eventfd_signal(\2);\n\t\1 = 1;\t/* op13: void since 6.8 */", text2)
 	# page_memcg() is gone: the page's folio's
 	text2 = re.sub(r"\bpage_memcg\(\s*([\w>.-]+)\s*\)", r"folio_memcg(page_folio(\1))", text2)
 	# struct memory_notify has no status_change_nid (6.17+): the node of the range's first page
