@@ -17,7 +17,8 @@
 #     (k618_fix618.py, tp_fix.py) and this port's own (oplus_fix.py, vendor_fix618.py);
 #  3. scripts/vendor_kbuild.py writes a Kbuild.<module> per module into its package and the build
 #     order: the wanted modules and what they need, less what is built already;
-#  4. builds each: make M=<package> MO=<obj>/<module> OPMOD=<module>, against the GKI build, the SoC
+#  4. builds each: make -k M=<package> MO=<obj>/<module> OPMOD=<module> (-k: every file that does not
+#     compile is in the log, not only the first), against the GKI build, the SoC
 #     configuration (forced in, env.sh) and the Module.symvers of everything built before it;
 #  5. builds the wanted modules that have only plain Makefiles (scripts/vendor_mkplan.py): each
 #     directory once, with the options that switch them on.
@@ -174,7 +175,7 @@ PY
 			(
 				MO=$P/obj/$name
 				mkdir -p "$MO"
-				"${KMAKE[@]}" M="$T/$pkg" MO="$MO" OPMOD="$base" modules -j1 KBUILD_EXTRA_SYMBOLS="$SYMS" \
+				"${KMAKE[@]}" -k M="$T/$pkg" MO="$MO" OPMOD="$base" modules -j1 KBUILD_EXTRA_SYMBOLS="$SYMS" \
 					NOSTDINC_FLAGS="-nostdinc -I$P/inc -I$S/include -I$S/include/uapi -idirafter $W/inc8750 -idirafter $C" \
 					KCFLAGS="-Wno-error -include $CONF" > "$LOG/$(basename "$P")-$name.log" 2>&1
 				echo "$? $MO/$base.ko" > "$MO/.result"
@@ -240,7 +241,7 @@ with open(out, "w") as w:
 PY
 		set +e
 		# shellcheck disable=SC2086
-		"${KMAKE[@]}" M="$T/$dir" MO="$MO" modules -j"$J" KBUILD_EXTRA_SYMBOLS="$MO/extra.symvers" $vars \
+		"${KMAKE[@]}" -k M="$T/$dir" MO="$MO" modules -j"$J" KBUILD_EXTRA_SYMBOLS="$MO/extra.symvers" $vars \
 			NOSTDINC_FLAGS="-nostdinc -I$P/inc -I$S/include -I$S/include/uapi -idirafter $W/inc8750 -idirafter $C" \
 			KCFLAGS="-Wno-error -include $CONF $defs" > "$LOG/$tag.log" 2>&1
 		rc=$?
@@ -266,7 +267,7 @@ PY2
 				[ -n "$o1" ] || continue
 				MO1=$MO-$n; mkdir -p "$MO1"; cp "$MO/extra.symvers" "$MO1/"
 				set +e
-				"${KMAKE[@]}" M="$T/$dir" MO="$MO1" modules -j"$J" KBUILD_EXTRA_SYMBOLS="$MO1/extra.symvers" "$o1=m" \
+				"${KMAKE[@]}" -k M="$T/$dir" MO="$MO1" modules -j"$J" KBUILD_EXTRA_SYMBOLS="$MO1/extra.symvers" "$o1=m" \
 					NOSTDINC_FLAGS="-nostdinc -I$P/inc -I$S/include -I$S/include/uapi -idirafter $W/inc8750 -idirafter $C" \
 					KCFLAGS="-Wno-error -include $CONF -D${o1}_MODULE=1" > "$LOG/$tag-$n.log" 2>&1
 				set -e
