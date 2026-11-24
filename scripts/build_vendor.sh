@@ -86,8 +86,13 @@ prepare() {
 	python3 -I "$ROOT/scripts/vendor_fix618.py" "$T/vendor" "$T/msm8750"
 	# trace headers name their own directory relative to the kernel's include/trace, in their tree's
 	# layout (../../../vendor/..., ../../kernel/oplus_cpu/...): each relative one becomes the absolute
-	# directory of the header that defines it
+	# directory of the header that defines it -- where the trace file it names is there: OnePlus'
+	# camera cam_trace_custom.h says "." for Qualcomm's cam_trace.h in another directory, found
+	# through the include path as before (camera: "cam_module_utils/./cam_trace.h not found")
 	grep -rlZ --include='*.h' --include='*.c' -E 'define[[:space:]]+[A-Z0-9_]*TRACE_INCLUDE_PATH[[:space:]]+\.' "$T" | while IFS= read -r -d '' h; do
+		f=$(sed -n -E 's#^[[:space:]]*\#[[:space:]]*define[[:space:]]+TRACE_INCLUDE_FILE[[:space:]]+([^[:space:]]+).*#\1#p' "$h" | head -1)
+		[ -n "$f" ] || f=$(basename "$h" .h)
+		[ -e "$(dirname "$h")/$f.h" ] || continue
 		sed -i -E "s#(define[[:space:]]+[A-Z0-9_]*TRACE_INCLUDE_PATH[[:space:]]+)\.[^[:space:]]*#\1$(dirname "$h")#" "$h"
 	done
 	# the charger's generated IC tables (its Bazel rule oplus_chg_ic_cfg runs this script), where its

@@ -144,6 +144,60 @@ EDITS = [
     ("oplus_uprobe.c",
      "static struct kprobe uprobe_unregister_kp = {\n\t.symbol_name = \"uprobe_unregister\"\n};",
      "static struct kprobe uprobe_unregister_kp = {\n\t.symbol_name = \"uprobe_unregister_nosync\"\n};"),
+    # sched_assist: its own declaration of the scheduler's set_next_entity() clashes with 6.18's
+    # (sched.h: a third argument, first -- true where a pick makes the entity current, as
+    # pick_next_task_fair() does)
+    ("sa_fair.c",
+     "extern void set_next_entity(struct cfs_rq *cfs_rq, struct sched_entity *se);\n", ""),
+    ("sa_fair.c",
+     "\t\t\tset_next_entity(cfs_rq, *se);\n",
+     "\t\t\tset_next_entity(cfs_rq, *se, true);\n"),
+    # frame_boost: android_vh_binder_restore_priority has no task argument in 6.18; binder calls it
+    # from the replying thread itself (binder_transaction(), before binder_restore_priority(thread))
+    ("frame_group.c",
+     "\tregister_trace_android_vh_binder_restore_priority(fbg_binder_restore_priority_hook, NULL);\n",
+     "\tregister_trace_android_vh_binder_restore_priority(k618_fbg_binder_restore_priority_hook, NULL);\n"),
+    ("frame_group.c",
+     "\n/*\n * fbg_binder_restore_priority_hook - check if the binder thread",
+     "\nstatic void fbg_binder_restore_priority_hook(void *unused, struct binder_transaction *t,\n"
+     "\tstruct task_struct *task);\n\n"
+     "/* op13: the 6.18 hook (scripts/oplus_fix.py) -- the task is the replying binder thread */\n"
+     "static void k618_fbg_binder_restore_priority_hook(void *unused, struct binder_transaction *t)\n"
+     "{\n\tfbg_binder_restore_priority_hook(unused, t, current);\n}\n"
+     "\n/*\n * fbg_binder_restore_priority_hook - check if the binder thread"),
+    # binder_strategy: the same 6.18 android_vh_binder_restore_priority, without the task (the
+    # replying thread: current)
+    ("binder_sched.c",
+     "\tregister_trace_android_vh_binder_restore_priority(\n\t\tandroid_vh_binder_restore_priority_handler, NULL);\n",
+     "\tregister_trace_android_vh_binder_restore_priority(\n\t\tk618_binder_restore_priority_handler, NULL);\n"),
+    ("binder_sched.c",
+     "\nvoid register_binder_sched_vendor_hooks(void)\n{\n",
+     "\n/* op13: the 6.18 hook (scripts/oplus_fix.py) -- the task is the replying binder thread */\n"
+     "static void k618_binder_restore_priority_handler(void *unused, struct binder_transaction *t)\n"
+     "{\n\tandroid_vh_binder_restore_priority_handler(unused, t, current);\n}\n"
+     "\nvoid register_binder_sched_vendor_hooks(void)\n{\n"),
+    # memleak_detect's slub copy: mm/slab.h has slub_debug_orig_size() itself in 6.18, and the slab
+    # lock is SL_locked (= PG_locked) on the slab's memdesc_flags_t, taken and released as 6.18's
+    # slub.c does (bit_spin_unlock: the other bits of those flags change concurrently)
+    ("slub_track.c",
+     "static inline bool slub_debug_orig_size(struct kmem_cache *s)\n{\n\treturn (kmem_cache_debug_flags(s, SLAB_STORE_USER) &&\n\t\t\t\t(s->flags & SLAB_KMALLOC));\n}\n",
+     ""),
+    ("slub_track.c",
+     "\tbit_spin_lock(PG_locked, &page->flags);\n",
+     "\tbit_spin_lock(SL_locked, &slab->flags.f);\t/* op13: as 6.18's slub.c */\n"),
+    ("slub_track.c",
+     "\t__bit_spin_unlock(PG_locked, &page->flags);\n",
+     "\tbit_spin_unlock(SL_locked, &slab->flags.f);\t/* op13: as 6.18's slub.c */\n"),
+    # charger v2: <../voocphy/...> and <../charger_ic/...> mean v2's own directories (found through
+    # v2/include in Bazel's sandbox, where nothing above the package is visible); here the package
+    # directory comes first and its parent holds the v1 charger, whose voocphy headers clash with
+    # v2's enums (oplus_chg_v2: "redefinition of enumerator 'TRACK_CP_ERR_DEFAULT'"). Relative to
+    # the file instead, which lands in v2.
+    ("oplus_hal_adsp.c", "#include <../voocphy/oplus_adsp_voocphy.h>", '#include "../voocphy/oplus_adsp_voocphy.h"'),
+    ("oplus_hal_sm8450.c", "#include <../voocphy/oplus_adsp_voocphy.h>", '#include "../voocphy/oplus_adsp_voocphy.h"'),
+    ("oplus_adsp_voocphy.c", "#include <../charger_ic/oplus_hal_sm8450.h>", '#include "../charger_ic/oplus_hal_sm8450.h"'),
+    ("oplus_adsp_voocphy.c", "#include <../charger_ic/oplus_hal_adsp.h>", '#include "../charger_ic/oplus_hal_adsp.h"'),
+    ("oplus_chglib.c", "#include <../voocphy/oplus_voocphy.h>", '#include "../oplus_voocphy.h"'),
 ]
 
 

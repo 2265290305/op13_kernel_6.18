@@ -558,6 +558,12 @@ def fix(path):
 		text = text2
 	# dma_buf_get_each() is gone (6.16): the exported iterator walks the same list, a reference held
 	# on each buffer while the callback looks at it
+	# so is android16-6.12's get_dmabuf_debugfs_data(): the same walk with the same callback
+	# (mm_osvelte's sys-dmabuf, the stability helper's lowmem watcher)
+	text2 = re.sub(r"\bget_dmabuf_debugfs_data\s*\(", "dma_buf_get_each(", text)
+	if text2 != text:
+		note(path, "get_dmabuf_debugfs_data")
+		text = text2
 	if re.search(r"\bdma_buf_get_each\s*\(", text) and "k618_dma_buf_get_each" not in text:
 		text = re.sub(r"\bdma_buf_get_each\s*\(", "k618_dma_buf_get_each(", text)
 		first = text.index("k618_dma_buf_get_each(")
@@ -580,6 +586,30 @@ def fix(path):
 		if "MODULE_IMPORT_NS" not in text or "DMA_BUF" not in text:
 			text += '\nMODULE_IMPORT_NS("DMA_BUF");\n'
 		note(path, "dma_buf_get_each")
+	# v4l2_fh_add()/v4l2_fh_del() take the file (6.18) only to set or clear its private_data: drivers
+	# that keep their own private_data (video's msm_vidc) pass a scratch one, as before
+	if re.search(r"\bv4l2_fh_(?:add|del)\(\s*[^,()]+\)", text) and "k618_v4l2_fh_add" not in text:
+		text = re.sub(r"\bv4l2_fh_(add|del)\(\s*([^,()]+)\)", r"k618_v4l2_fh_\1(\2)", text)
+		marker = re.search(r"k618_v4l2_fh_(?:add|del)\(", text).group(0)
+		text = insert_top_level(text, marker,
+			"/* 6.18: v4l2_fh_add/_del take a file to set its private_data (vendor_fix618.py) */\n"
+			"static inline void k618_v4l2_fh_add(struct v4l2_fh *fh)\n{\n"
+			"\tstruct file f = {};\n\n\tv4l2_fh_add(fh, &f);\n}\n\n"
+			"static inline void k618_v4l2_fh_del(struct v4l2_fh *fh)\n{\n"
+			"\tstruct file f = {};\n\n\tv4l2_fh_del(fh, &f);\n}\n")
+		note(path, "v4l2_fh_add/del")
+	# vb2_queue.num_buffers is private since 6.8: vb2_get_num_buffers()
+	text2 = re.sub(r"([\w.\[\]>-]*\bvb2q)->num_buffers\b", r"vb2_get_num_buffers(\1)", text)
+	if text2 != text:
+		note(path, "vb2 num_buffers")
+		text = text2
+	# gpio_free_array() is gone (6.18): each one freed, as the OnePlus 15's camera does
+	text2 = re.sub(r"\bgpio_free_array\(\s*([^,()]+?)\s*,\s*([^;()]+?)\s*\);",
+		r"{ unsigned int k618_i; for (k618_i = 0; k618_i < (\2); k618_i++) gpio_free((\1)[k618_i].gpio); }",
+		text)
+	if text2 != text:
+		note(path, "gpio_free_array")
+		text = text2
 	# page_mapcount() is gone (6.15): a page's folio's mapcount
 	text2 = re.sub(r"\bpage_mapcount\(\s*(\w+)\s*\)", r"folio_mapcount(page_folio(\1))", text)
 	if text2 != text:
@@ -636,9 +666,9 @@ def fix(path):
 			text = re.sub(r"\bdevm_gpio_request\s*\(", "k618_devm_gpio_request(", text)
 			if "linux/gpio.h" not in text:
 				text, _ = include_if(text, r".", "linux/gpio.h")
-			m = list(re.finditer(r"^#include\s*[<\"].*$", text, re.M))
-			at = m[-1].end() if m else 0
-			text = text[:at] + "\n" + DEVM_GPIO + text[at:]
+			# after an include no #if encloses (fingerprint's fp_platform.c ends its includes in an
+			# #if/#else: the helper went into the branch the build does not take)
+			text = insert_top_level(text, "k618_devm_gpio_request(", DEVM_GPIO)
 			note(path, "devm_gpio_request")
 		# struct thermal_zone_device is opaque outside drivers/thermal (6.x): its definition
 		if re.search(r"\bstruct\s+thermal_zone_device\b", text) and \
