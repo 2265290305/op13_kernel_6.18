@@ -53,6 +53,11 @@ def main(argv):
     if len(argv) > 4 and os.path.isfile(argv[4]):
         new = {canon(line) for line in open(argv[4]) if line.strip()}
     hold = len(argv) > 5 and argv[5] == "hold"
+    # device/op13/bringup-hold.txt: new drivers no image loads yet (OnePlus' failure-recovery ones):
+    # held in boot-full.img too
+    bh = os.path.join(os.path.dirname(stock.rstrip("/")), "bringup-hold.txt")
+    bringup = {canon(l) for l in open(bh) if l.strip() and not l.startswith("#")} if os.path.isfile(bh) else set()
+    held_full = (new & bringup) if not hold else set()
     late_names = set(LATE) | new
     have = {canon(f): f for f in os.listdir(rd) if f.endswith(".ko")}
     blocked = {canon(line.split()[1]) for line in read_list(f"{stock}/modules.blocklist")
@@ -84,21 +89,23 @@ def main(argv):
     nosrc_file = os.path.join(os.path.dirname(stock.rstrip("/")), "no-source.txt")
     nosrc = {canon(l) for l in open(nosrc_file) if l.strip() and not l.startswith("#")} \
         if os.path.isfile(nosrc_file) else set()
-    wanted, missing_second = [m for m in moved if m not in in_init and not hold], []
+    wanted, missing_second = [m for m in moved if m not in in_init and not hold
+                              and canon(m) not in held_full], []
     for lst in ("vendor_dlkm.load", "system_dlkm.load"):
         for n in read_list(f"{stock}/{lst}"):
             k = canon(n)
             if k not in have:
                 if k not in nosrc:
                     missing_second.append(os.path.basename(n))
-            elif hold and k in new:
+            elif (hold and k in new) or k in held_full:
                 continue
             elif k not in blocked and have[k] not in in_init and have[k] not in wanted:
                 wanted.append(have[k])
     # modules no stock list names stay in the layer for modprobe on demand, never loaded blindly:
     # some are self-tests (torture, KUnit) that must not run on a phone
     extra = sorted(f for k, f in have.items() if f not in in_init and f not in wanted
-                   and k not in blocked and k != "k618_load" and not (hold and k in new))
+                   and k not in blocked and k != "k618_load" and not (hold and k in new)
+                   and k not in held_full)
     ordered, placed = [], set()
 
     def place(m, path=()):
