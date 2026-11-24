@@ -6,9 +6,9 @@ S=$ROOT/src/soc			# Qualcomm/OnePlus SoC modules (sm8850 tree, built for sun)
 REF=$ROOT/ref_8550/kernel-6.18	# the reference port's helpers
 J=${JOBS:-$(nproc)}
 
-# the compiler: Google's clang when scripts/get_clang.sh fetched it, else Ubuntu's LLVM 19 (what CI
-# installs), else whatever clang is on PATH
-for CLANG_DIR in "$ROOT/toolchain/clang-r584948c/bin" /usr/lib/llvm-19/bin; do
+# the compiler: Google's clang-r584948c (22.0.1) when scripts/get_clang.sh fetched it, else LLVM 22
+# from apt.llvm.org (what CI installs), else whatever clang is on PATH
+for CLANG_DIR in "$ROOT/toolchain/clang-r584948c/bin" /usr/lib/llvm-22/bin; do
 	[ -x "$CLANG_DIR/clang" ] && { PATH=$CLANG_DIR:$PATH; break; }
 done
 # ccache in front of clang only (as `clang` on PATH: ccache finds the real one behind it)
