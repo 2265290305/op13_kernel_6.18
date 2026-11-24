@@ -56,6 +56,15 @@ for n, (d, opt) in sorted(found.items()):
 	if opt:
 		e[0].add(opt)
 	e[1].append(n)
+	# the options of the module's own parts too ("<name>-$(CONFIG_X) += part.o"): oplus_haptic's
+	# Awinic and SI drivers (CONFIG_AW_HAPTIC, CONFIG_SIH_HAPTIC) -- left out, its core alone did not link
+	for f in ("Makefile", "Kbuild"):
+		mf = os.path.join(TREE, d, f)
+		if os.path.isfile(mf):
+			mt = open(mf, errors="ignore").read().replace("\\\n", " ")
+			for pm in re.finditer(r"^\s*([\w-]+)-\$\((CONFIG_\w+)\)\s*[:+]?=", mt, re.M):
+				if norm(pm.group(1)) == n:
+					e[0].add(pm.group(2))
 with open(PLAN, "w") as p:
 	for d, (opts, names) in sorted(bydir.items()):
 		p.write("%s|%s|%s\n" % (d, " ".join(sorted(opts)), " ".join(names)))
