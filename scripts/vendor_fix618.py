@@ -376,6 +376,45 @@ def fix_hrtimer_expr(path, text):
 	return "".join(out) + text[pos:]
 
 
+def required_literal(pattern):
+	"""the longest identifier (5+ characters) a pattern requires: outside any group, character class
+	or escape, and not under a quantifier -- a file without it cannot match, so the rule is skipped
+	there (unanchored rules starting with a class ran at every position of every file: the
+	preparation of the vendor trees went from ~9 to ~21 min a pass)"""
+	best, depth, i, cls = "", 0, 0, False
+	while i < len(pattern):
+		c = pattern[i]
+		if c == "\\":
+			i += 2
+			continue
+		if cls:
+			cls = c != "]"
+		elif c == "[":
+			cls = True
+		elif c == "(":
+			depth += 1
+		elif c == ")":
+			depth -= 1
+		elif depth == 0 and (c.isalpha() or c == "_"):
+			j = i
+			while j < len(pattern) and (pattern[j].isalnum() or pattern[j] == "_"):
+				j += 1
+			run = pattern[i:j]
+			if j < len(pattern) and pattern[j] in "?*{":
+				run = run[:-1]		# its last character is optional
+			if len(run) >= 5 and len(run) > len(best):
+				best = run
+			i = j
+			continue
+		elif c == "|" and depth == 0:
+			return ""		# alternatives at the top: nothing is required
+		i += 1
+	return best
+
+
+RULE_LITERALS = [required_literal(rx.pattern) for _n, rx, _r in RULES]
+
+
 def fix(path):
 	try:
 		text = open(path, encoding="utf-8", errors="surrogateescape").read()
@@ -384,7 +423,9 @@ def fix(path):
 	orig = text
 	text = fix_zcomp(path, text)
 	text = fix_comp_alg(path, text)
-	for name, rx, repl in RULES:
+	for (name, rx, repl), lit in zip(RULES, RULE_LITERALS):
+		if lit and lit not in text:
+			continue		# cannot match: the literal it requires is not there
 		text2 = rx.sub(repl, text)
 		if text2 != text:
 			note(path, name)
@@ -617,7 +658,7 @@ def fix(path):
 			"\tstruct file f = {};\n\n\tv4l2_fh_del(fh, &f);\n}\n")
 		note(path, "v4l2_fh_add/del")
 	# vb2_queue.num_buffers is private since 6.8: vb2_get_num_buffers()
-	text2 = re.sub(r"([\w.\[\]>-]*\bvb2q)->num_buffers\b", r"vb2_get_num_buffers(\1)", text)
+	text2 = re.sub(r"([\w.\[\]>-]*\bvb2q)->num_buffers\b", r"vb2_get_num_buffers(\1)", text) if "num_buffers" in text else text
 	if text2 != text:
 		note(path, "vb2 num_buffers")
 		text = text2
@@ -658,7 +699,7 @@ def fix(path):
 			note(path, "device_find_child match")
 			text = text2
 	# page->index is gone (6.16, the folio's): hybridswap stores a sector in its bio pages' index
-	text2 = re.sub(r"((?:\b\w+\s*(?:->|\.)\s*)*\bdest_pages\[\s*\w+\s*\])->index\b", r"page_folio(\1)->index", text)
+	text2 = re.sub(r"((?:\b\w+\s*(?:->|\.)\s*)*\bdest_pages\[\s*\w+\s*\])->index\b", r"page_folio(\1)->index", text) if "dest_pages" in text else text
 	if text2 != text:
 		note(path, "page index")
 		text = text2
@@ -671,19 +712,25 @@ def fix(path):
 			note(path, "after_dequeue_task")
 			text = text2
 	# hrtimer_clock_base.get_time is gone (6.18): the timer's clock through hrtimer_cb_get_time()
-	text2 = re.sub(r"(&?)\b([\w.>-]+?)\.base->get_time\(\)", lambda m: "hrtimer_cb_get_time(&%s)" % m.group(2) if not m.group(1) else m.group(0), text)
-	text2 = re.sub(r"\b([\w>-]+?)->base->get_time\(\)", r"hrtimer_cb_get_time(\1)", text2)
+	text2 = text
+	if "->get_time()" in text:
+		text2 = re.sub(r"(&?)\b([\w.>-]+?)\.base->get_time\(\)", lambda m: "hrtimer_cb_get_time(&%s)" % m.group(2) if not m.group(1) else m.group(0), text2)
+		text2 = re.sub(r"\b([\w>-]+?)->base->get_time\(\)", r"hrtimer_cb_get_time(\1)", text2)
 	if text2 != text:
 		note(path, "hrtimer get_time")
 		text = text2
 	# eventfd_signal() takes no count since 6.8 (it was 1)
-	text2 = re.sub(r"\beventfd_signal\(\s*([^,()]+?)\s*,\s*1\s*\)", r"eventfd_signal(\1)", text)
-	# ... and returns nothing: an assignment of its result gets what it returned, 1
-	text2 = re.sub(r"\b(\w+)\s*=\s*eventfd_signal\(([^;]+?)\)\s*;", r"eventfd_signal(\2);\n\t\1 = 1;\t/* op13: void since 6.8 */", text2)
+	text2 = text
+	if "eventfd_signal" in text2:
+		text2 = re.sub(r"\beventfd_signal\(\s*([^,()]+?)\s*,\s*1\s*\)", r"eventfd_signal(\1)", text2)
+		# ... and returns nothing: an assignment of its result gets what it returned, 1
+		text2 = re.sub(r"\b(\w+)\s*=\s*eventfd_signal\(([^;]+?)\)\s*;", r"eventfd_signal(\2);\n\t\1 = 1;\t/* op13: void since 6.8 */", text2)
 	# page_memcg() is gone: the page's folio's
-	text2 = re.sub(r"\bpage_memcg\(\s*([\w>.-]+)\s*\)", r"folio_memcg(page_folio(\1))", text2)
+	if "page_memcg" in text2:
+		text2 = re.sub(r"\bpage_memcg\(\s*([\w>.-]+)\s*\)", r"folio_memcg(page_folio(\1))", text2)
 	# struct memory_notify has no status_change_nid (6.17+): the node of the range's first page
-	text2 = re.sub(r"\b(\w+)->status_change_nid\b", r"pfn_to_nid(\1->start_pfn)", text2)
+	if "status_change_nid" in text2:
+		text2 = re.sub(r"\b(\w+)->status_change_nid\b", r"pfn_to_nid(\1->start_pfn)", text2)
 	if text2 != text:
 		note(path, "eventfd/page_memcg/memory_notify")
 		text = text2
