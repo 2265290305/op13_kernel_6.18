@@ -537,6 +537,14 @@ def fix(path):
 			"\t\tif (k618_bdev_files[i] && file_bdev(k618_bdev_files[i]) == bdev) {\n"
 			"\t\t\tfput(k618_bdev_files[i]);\n\t\t\tk618_bdev_files[i] = NULL;\n\t\t\treturn;\n\t\t}\n}\n")
 		note(path, "blkdev_get_by_dev")
+	# attribute_group.bin_attrs holds const pointers (6.15): the lists it is given become const
+	names = set(re.findall(r"\.bin_attrs\s*=\s*(\w+)\s*,", text))
+	for nm in names:
+		text2 = re.sub(r"\bstatic\s+struct\s+bin_attribute\s*\*\s*%s\s*\[\]" % re.escape(nm),
+			"static const struct bin_attribute *const %s[]" % nm, text)
+		if text2 != text:
+			note(path, "const bin_attrs")
+			text = text2
 	# alarm callbacks return void (6.18: enum alarmtimer_restart is gone). Every OnePlus/Qualcomm one
 	# returns ALARMTIMER_NORESTART -- none re-arms through its return value
 	if "enum alarmtimer_restart" in text and "ALARMTIMER_RESTART;" not in text:
