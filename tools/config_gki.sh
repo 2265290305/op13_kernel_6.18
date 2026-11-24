@@ -24,6 +24,8 @@ GKI_SELECTED="SND_SOC_HDMI_CODEC"
 args=""
 for c in $GKI_MODS; do args="$args -m $c"; done
 # STATIC_USERMODEHELPER off: the reference's batch module loader is a usermode helper.
+# MEMCG_V1: ColorOS mounts the v1 memory cgroup (test-45: "cgroup: Unknown subsys name 'memory'"),
+# as the stock 6.6 kernel offers it; 6.18 has it behind its own option, off in gki_defconfig.
 # Debug info and BTF as gki_defconfig and the stock kernel have them (DWARF5, zstd-compressed,
 # DEBUG_INFO_BTF): BPF programs and tools read the kernel's types from /sys/kernel/btf/vmlinux.
 # Symbol CRCs from DWARF (gendwarfksyms), as gki_defconfig has them: Rust needs it with MODVERSIONS
@@ -31,11 +33,11 @@ for c in $GKI_MODS; do args="$args -m $c"; done
 # module; genksyms here had turned all three off (olddefconfig, silently). SHA-256 module
 # signatures: hosts with a strict crypto policy (RHEL 9) refuse to make SHA-1 ones.
 $C/scripts/config --file "$O/.config" $args -d STATIC_USERMODEHELPER \
-	-e DEBUG_INFO_BTF -e MODULE_ALLOW_BTF_MISMATCH \
+	-e DEBUG_INFO_BTF -e MODULE_ALLOW_BTF_MISMATCH -e MEMCG_V1 \
 	-e RUST -e GENDWARFKSYMS -d MODULE_SIG_SHA1 -e MODULE_SIG_SHA256 --set-val LOG_BUF_SHIFT 18 \
 	--set-str LOCALVERSION "$KNAME" -d LOCALVERSION_AUTO
 $M olddefconfig >> "$O/../gki-config.log" 2>&1
-for c in RUST ASHMEM GENDWARFKSYMS DEBUG_INFO_DWARF5 DEBUG_INFO_BTF MODULE_ALLOW_BTF_MISMATCH MODULE_SIG_SHA256; do
+for c in MEMCG_V1 RUST ASHMEM GENDWARFKSYMS DEBUG_INFO_DWARF5 DEBUG_INFO_BTF MODULE_ALLOW_BTF_MISMATCH MODULE_SIG_SHA256; do
 	grep -q "^CONFIG_$c=y" "$O/.config" || { echo "config_gki: CONFIG_$c did not take"; exit 1; }
 done
 for c in $GKI_MODS; do

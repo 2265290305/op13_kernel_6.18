@@ -285,6 +285,84 @@ PY
 	echo "android_vh_thermal_pm_notify_suspend added"
 fi
 
+# remoteproc auto-boot that finds no firmware tries again: here the SoC's remoteprocs (ADSP, CDSP) are
+# loaded in the first stage, before /vendor/firmware_mnt is mounted and ueventd serves firmware --
+# "Direct firmware load for adsp.mdt failed with error -2", and the 6.18 core never tries again: the
+# DSPs stayed off and adsprpcd/cdsprpcd crashed in a loop (test-43, test-45). The stock kernel loads
+# them in the second stage. Retried with rproc_boot() (the stock path), 2 s doubling to 16 s, about
+# four minutes, while the processor is still offline.
+RP=$C/drivers/remoteproc/remoteproc_core.c
+if ! grep -q 'op13_rproc_retry' $RP; then
+	python3 -I - "$RP" <<'PY'
+import sys
+p = sys.argv[1]
+t = open(p).read()
+old = ("static void rproc_auto_boot_callback(const struct firmware *fw, void *context)\n{\n"
+       "\tstruct rproc *rproc = context;\n\n\trproc_boot(rproc);\n\n\trelease_firmware(fw);\n}\n")
+assert t.count(old) == 1, "remoteproc auto boot: anchor"
+new = r'''/* op13: auto-boot again once the firmware is there (tools/prep_common.sh) */
+struct op13_rproc_retry {
+	struct delayed_work work;
+	struct rproc *rproc;
+	unsigned int delay;
+	unsigned int waited;
+};
+
+static void op13_rproc_retry_fn(struct work_struct *work)
+{
+	struct op13_rproc_retry *r = container_of(to_delayed_work(work), struct op13_rproc_retry, work);
+	struct rproc *rproc = r->rproc;
+
+	if (rproc->state == RPROC_OFFLINE) {
+		if (!rproc_boot(rproc)) {
+			dev_info(&rproc->dev, "op13: %s booted after %u s\n", rproc->firmware, r->waited);
+		} else if (r->waited < 240) {
+			r->waited += r->delay;
+			schedule_delayed_work(&r->work, r->delay * HZ);
+			if (r->delay < 16)
+				r->delay *= 2;
+			return;
+		} else {
+			dev_warn(&rproc->dev, "op13: %s still not loadable after %u s\n", rproc->firmware, r->waited);
+		}
+	}
+	put_device(&rproc->dev);
+	kfree(r);
+}
+
+static void rproc_auto_boot_callback(const struct firmware *fw, void *context)
+{
+	struct rproc *rproc = context;
+
+	if (!fw && rproc->state == RPROC_OFFLINE) {
+		struct op13_rproc_retry *r = kzalloc(sizeof(*r), GFP_KERNEL);
+
+		if (r) {
+			dev_info(&rproc->dev, "op13: %s not there yet, auto-boot again later\n", rproc->firmware);
+			r->rproc = rproc;
+			r->delay = 2;
+			r->waited = 2;
+			get_device(&rproc->dev);
+			INIT_DELAYED_WORK(&r->work, op13_rproc_retry_fn);
+			schedule_delayed_work(&r->work, 2 * HZ);
+			return;
+		}
+	}
+
+	rproc_boot(rproc);
+
+	release_firmware(fw);
+}
+'''
+t = t.replace(old, new)
+if "#include <linux/workqueue.h>" not in t:
+	t = t.replace("#include <linux/slab.h>\n", "#include <linux/slab.h>\n#include <linux/workqueue.h>\n", 1)
+open(p, "w").write(t)
+PY
+	grep -q 'op13_rproc_retry' $RP || { echo "remoteproc auto-boot retry: edit failed"; exit 1; }
+	echo "remoteproc auto-boot retry added"
+fi
+
 # op13_deadline=<seconds>: a boot that has not started zygote by then logs where every blocked task
 # waits and every CPU's stack, for the ramoops log a Power+VolUp reset keeps. Once zygote has run,
 # it does nothing.
