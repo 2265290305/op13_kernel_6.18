@@ -353,10 +353,21 @@ def fix_hrtimer_expr(path, text):
 		if m.start() < pos:
 			continue
 		t = m.group(1)
-		lhs = re.escape(t[1:].strip()) + r"\s*\." if t.startswith("&") else re.escape(t) + r"\s*->"
+		# the timer by its tokens, whitespace between them free: datarmnet-ext's generated sources
+		# break "&X.\nY" over lines, and an exact match missed them (rmnet_mem's and rmnet_shs'
+		# timers were set up with no callback: "WARNING: ... __hrtimer_setup", test-46)
+		tok = re.findall(r"\w+|[^\w\s]", t)
+		amp = tok[:1] == ["&"]
+		lhs = r"\s*".join(re.escape(x) for x in (tok[1:] if amp else tok)) + (r"\s*\.\s*" if amp else r"\s*->\s*")
 		a = re.compile(r"\s*" + lhs + r"function\s*=\s*([^;]+?)\s*;").match(text, m.end())
-		if not a or re.fullmatch(r"\w+", a.group(1)):
-			continue		# none right after, or a plain name: k618_fix618's
+		if not a:
+			# an array of timers set up in a loop, each one's callback assigned after by index (the
+			# charger's ufcs_timer.c): 6.18's placeholder callback for that, not NULL (a WARN each)
+			if re.search(r"\[\s*\w+\s*\]\s*$", t):
+				out.append(text[pos:m.start()] + "hrtimer_setup(%s, hrtimer_dummy_timeout, %s, %s);"
+					% (t, m.group(2), m.group(3)))
+				pos = m.end()
+			continue		# otherwise none right after: k618_fix618's
 		out.append(text[pos:m.start()] + "hrtimer_setup(%s, %s, %s, %s);" % (t, a.group(1), m.group(2), m.group(3)))
 		pos = a.end()
 	if not out:
