@@ -59,10 +59,17 @@ prepare() {
 	mkdir -p "$T/vendor/qcom/opensource" "$P/inc/soc/oplus" "$P/inc/linux"
 	QREPOS=$(cd "$SRC/vendor/qcom/opensource" && ls -d -- */ | tr -d / | grep -v -- '-devicetree$' | tr '\n' ' ')
 	cp -r "$SRC/vendor/oplus" "$T/vendor/oplus"
+	# directory links inside the tree become copies, as Bazel's sandbox has them: through a link,
+	# "<dir>/../x" resolves next to the link's target (charger/bazel/v2 -> ../v2: v2's
+	# <../voocphy/...> found the old v1 voocphy, duplicate definitions in oplus_chg_v2)
+	find "$T/vendor/oplus" -type l -xtype d | while read -r l; do
+		tgt=$(readlink -f "$l")
+		case $tgt in "$T"/*) rm "$l" && cp -r "$tgt" "$l" ;; esac
+	done
 	for d in st nxp; do [ -d "$SRC/vendor/$d" ] && cp -r "$SRC/vendor/$d" "$T/vendor/"; done
 	for r in $QREPOS; do cp -r "$SRC/vendor/qcom/opensource/$r" "$T/vendor/qcom/opensource/"; done
 	# the definitions, read before the copy's fixes; OnePlus' macro file from that tree's kernel_platform
-	STOCK_CONFIG=$ROOT/device/op13/oplus-features.config \
+	STOCK_CONFIG=$ROOT/out/soc-kconfig/.config:$ROOT/device/op13/oplus-features.config \
 	BZL_KVER=$KV BZL_MACROS=$SRC/kernel_platform/oplus/bazel python3 -I "$ROOT/scripts/bzl_eval.py" "$T" "$P/modules.json" \
 		vendor/oplus $(for r in $QREPOS; do echo "vendor/qcom/opensource/$r"; done)
 	# this port's fixes first as well: some patterns the reference's sweep would take wrongly

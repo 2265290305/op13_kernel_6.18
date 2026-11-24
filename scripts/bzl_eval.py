@@ -394,9 +394,11 @@ def do_load(env, pkg, label, names, alias):
 
 
 def main():
-	stock = os.environ.get("STOCK_CONFIG")
-	if stock and os.path.isfile(stock):
-		stock_config(stock)
+	# the configurations conditional sources are chosen by (colon-separated): the SoC's evaluated
+	# .config (CONFIG_PCI_MSM: cnss2's pci_qcom.c) and OnePlus' feature switches
+	for stock in (os.environ.get("STOCK_CONFIG") or "").split(":"):
+		if stock and os.path.isfile(stock):
+			stock_config(stock)
 	# OnePlus' macro file: OPLUS_FEATURES and the kernel version come from its variant file,
 	# which its build generates; ours names sun/perf and the 6.6 kernel these sources are for
 	variant = os.path.join(MACROS, "oplus_modules_variant.bzl")
