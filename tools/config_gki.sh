@@ -26,15 +26,16 @@ for c in $GKI_MODS; do args="$args -m $c"; done
 # STATIC_USERMODEHELPER off: the reference's batch module loader is a usermode helper.
 # Debug info and BTF as gki_defconfig and the stock kernel have them (DWARF5, zstd-compressed,
 # DEBUG_INFO_BTF): BPF programs and tools read the kernel's types from /sys/kernel/btf/vmlinux.
-# Genksyms CRCs: every module is rebuilt here, so CRCs only have to agree with each other, and
-# genksyms does not depend on each vendor module's DWARF. SHA-256 module signatures: hosts with a
-# strict crypto policy (RHEL 9) refuse to make SHA-1 ones.
+# Symbol CRCs from DWARF (gendwarfksyms), as gki_defconfig has them: Rust needs it with MODVERSIONS
+# (init/Kconfig), and with Rust go ashmem -- Android's, in Rust since 6.12 -- and the Rust binder
+# module; genksyms here had turned all three off (olddefconfig, silently). SHA-256 module
+# signatures: hosts with a strict crypto policy (RHEL 9) refuse to make SHA-1 ones.
 $C/scripts/config --file "$O/.config" $args -d STATIC_USERMODEHELPER \
 	-e DEBUG_INFO_BTF -e MODULE_ALLOW_BTF_MISMATCH \
-	-d GENDWARFKSYMS -e GENKSYMS -d MODULE_SIG_SHA1 -e MODULE_SIG_SHA256 --set-val LOG_BUF_SHIFT 18 \
+	-e RUST -e GENDWARFKSYMS -d MODULE_SIG_SHA1 -e MODULE_SIG_SHA256 --set-val LOG_BUF_SHIFT 18 \
 	--set-str LOCALVERSION "$KNAME" -d LOCALVERSION_AUTO
 $M olddefconfig >> "$O/../gki-config.log" 2>&1
-for c in GENKSYMS DEBUG_INFO_DWARF5 DEBUG_INFO_BTF MODULE_ALLOW_BTF_MISMATCH MODULE_SIG_SHA256; do
+for c in RUST ASHMEM GENDWARFKSYMS DEBUG_INFO_DWARF5 DEBUG_INFO_BTF MODULE_ALLOW_BTF_MISMATCH MODULE_SIG_SHA256; do
 	grep -q "^CONFIG_$c=y" "$O/.config" || { echo "config_gki: CONFIG_$c did not take"; exit 1; }
 done
 for c in $GKI_MODS; do

@@ -50,6 +50,14 @@ jobs:
           sudo make -C /tmp/dwarves/build install > /dev/null
           sudo ldconfig
           pahole --version
+          # Rust (CONFIG_RUST, as gki_defconfig: Android's ashmem is a Rust driver in 6.18, and the
+          # Rust binder module): rustc 1.91.1 as build.config.constants pins (RUSTC_VERSION), with
+          # the standard library's source, and bindgen on clang 22's libclang
+          rustup toolchain install 1.91.1 --profile minimal --component rust-src > /dev/null
+          rustup default 1.91.1
+          sudo apt-get install -y -qq bindgen
+          echo "LIBCLANG_PATH=/usr/lib/llvm-22/lib" >> "$GITHUB_ENV"
+          rustc --version; bindgen --version
 
       - name: Sources
         run: bash scripts/fetch.sh

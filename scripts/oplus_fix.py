@@ -99,6 +99,16 @@ EDITS = [
     ("hybridmain.c",
      "register_trace_android_vh_alloc_pages_slowpath(hybridswapd_ops->vh_alloc_pages_slowpath, NULL)",
      "register_trace_android_vh_alloc_pages_slowpath_end(k618_slowpath_end, NULL)"),
+    # mm_osvelte's ashmem statistics (sys-ashmem.c) read the C ashmem driver's struct ashmem_area;
+    # 6.18's ashmem is the Rust driver, whose area is reachable only through accessors that take a
+    # mutex -- and this walk runs from an fd iteration in atomic context (GFP_ATOMIC). Left out:
+    # the rest of mm_osvelte (memory tracking, lowmem debug, dma-buf statistics) does not need it
+    ("Makefile",
+     "oplus_bsp_mm_osvelte-$(CONFIG_ASHMEM) += sys-ashmem.o\n",
+     "# op13: sys-ashmem.o left out (scripts/oplus_fix.py)\n"),
+    ("sys-memstat.c",
+     "\tdir_entry = mtrack_procs[MTRACK_ASHMEM];\n\tif (dir_entry)\n\t\tcreate_ashmem_procfs(dir_entry);\n",
+     "\t/* op13: no ashmem statistics on 6.18's Rust ashmem (scripts/oplus_fix.py) */\n"),
     ("oplus_uprobe.c",
      "static struct kprobe uprobe_unregister_kp = {\n\t.symbol_name = \"uprobe_unregister\"\n};",
      "static struct kprobe uprobe_unregister_kp = {\n\t.symbol_name = \"uprobe_unregister_nosync\"\n};"),
