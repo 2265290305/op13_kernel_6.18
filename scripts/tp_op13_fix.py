@@ -77,7 +77,9 @@ EDITS = [
      "\tu32 gmu_context_queue_addr;\n\t/* op13: no dcvs_profile_addr (SM8750 GMU firmware) */\n} __packed;"),
     ("graphics-kernel/adreno_gen8_hwsched_hfi.c",
      "\tcmd.version = 1;\n\tcmd.dcvs_profile_addr = GMU_BUF_ADDR(md);\n",
-     "\tcmd.version = 1;\n\t(void)md;\t/* op13: no dcvs_profile_addr (SM8750 GMU firmware) */\n"),
+     "\t/* op13: version 0 and no dcvs_profile_addr, as the OnePlus 13's own KGSL sends it: version 1\n"
+     "\t * announces the SM8850 layout with dcvs_profile_addr, which its GMU firmware does not have */\n"
+     "\t(void)md;\n"),
 ]
 
 
