@@ -300,13 +300,17 @@ PY2
 
 # the wanted modules no pass has built yet (stock lists, less what exists): one name a line
 still_wanted() {
-	python3 -I - "$1" "$HAVE" "$OUTM" "$ST/first_stage.load" "$ST/vendor_dlkm.load" "$ST/system_dlkm.load" \
+	O=$O python3 -I - "$1" "$HAVE" "$OUTM" "$ST/first_stage.load" "$ST/vendor_dlkm.load" "$ST/system_dlkm.load" \
 		"$ST/../no-source.txt" <<'PY'
 import os, sys
 out, have, outm, *lists = sys.argv[1:]
 nosrc = lists.pop()
 c = lambda n: os.path.basename(n.strip()).removesuffix(".ko").replace("-", "_")
 got = {c(f) for d in (have, outm) for f in os.listdir(d)}
+# what the kernel has built in (xhci-sideband, drm_display_helper: =y in our GKI)
+builtin = os.path.join(os.environ.get("O", ""), "modules.builtin")
+if os.path.isfile(builtin):
+	got |= {c(l) for l in open(builtin) if l.strip()}
 skip = {c(l) for l in open(nosrc) if l.strip() and not l.startswith("#")} if os.path.isfile(nosrc) else set()
 want = []
 for l in lists:
