@@ -85,8 +85,9 @@ def gpu_as_op13(root):
     """The OnePlus 13's GPU (Adreno 830: gen8_0_1, Sun v2's DT; gen8_0_0 for v1) as the OnePlus 13's
     own KGSL sets it up: without the GMU thermal mitigation, the thermal profile and the
     no-fault-tolerance timeout the SM8850 release sends its GMU (OnePlus took them out for SM8750:
-    "bug:8274887"). The CLX table stays: OnePlus' SM8750 KGSL sends the same one, built in code
-    (without it the SM8850 KGSL turns CLX off). test-40: the phone's GMU firmware answered the boot handshake with HFI error 115
+    "bug:8274887"), and without the CLX table: OnePlus' SM8750 KGSL builds the same table in code,
+    but here the GMU firmware answers it with error 115 every boot (test-40 and test-44 sent it and
+    hung; test-43 left it out and its GPU came up). test-40: the phone's GMU firmware answered the boot handshake with HFI error 115
     (ResMgrCalibrate) and stopped acking, the GPU never came up, surfaceflinger kept dying."""
     path = os.path.join(root, "graphics-kernel/adreno-gpulist.h")
     if not os.path.exists(path):
@@ -98,7 +99,7 @@ def gpu_as_op13(root):
         nonlocal n
         b = m.group(0)
         b2 = b.replace("ADRENO_ACD | ADRENO_CLX | ADRENO_GMU_THERMAL_MITIGATION,", "ADRENO_ACD | ADRENO_CLX,")
-        b2 = re.sub(r"\n\t\.(cl_no_ft_timeout_ms|therm_profile) =[^\n]*,", "", b2)
+        b2 = re.sub(r"\n\t\.(cl_no_ft_timeout_ms|therm_profile|clx_tbl) =[^\n]*,", "", b2)
         if b2 != b:
             n += 1
         return b2
