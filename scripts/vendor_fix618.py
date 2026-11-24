@@ -462,6 +462,28 @@ def fix(path):
 	if text2 != text:
 		note(path, "const to_*_driver")
 		text = text2
+	# the thermal core keeps trip descriptors since 6.12: tz->trips[i] is a struct thermal_trip_desc
+	# (its .trip the trip), each with its own instance list (thermal_instances/trip_node: tz-wide
+	# thermal_instances/tz_node are gone), and __thermal_zone_get_trip() is gone (oplus_ipa_thermal)
+	if re.search(r"->thermal_instances\s*,\s*tz_node|__thermal_zone_get_trip\s*\(|struct\s+thermal_trip\s*\*\s*\w+\s*=\s*&\s*\w+->trips\[", text):
+		text = re.sub(r"(struct\s+thermal_trip\s*\*\s*\w+\s*=\s*&\s*\w+->trips\[[^\];]+\])(\s*;)", r"\1.trip\2", text)
+		text = re.sub(r"\blist_for_each_entry\(\s*(\w+)\s*,\s*&\s*(\w+)->thermal_instances\s*,\s*tz_node\s*\)",
+			r"k618_for_each_tz_instance(\2, \1)", text)
+		if "__thermal_zone_get_trip" in text and "k618_thermal_zone_get_trip" not in text:
+			text = re.sub(r"\b__thermal_zone_get_trip\s*\(", "k618_thermal_zone_get_trip(", text)
+		marker = "k618_for_each_tz_instance" if "k618_for_each_tz_instance" in text else "k618_thermal_zone_get_trip"
+		if "define k618_for_each_tz_instance" not in text:
+			text = insert_top_level(text, marker,
+				"/* 6.12+ thermal core: trip descriptors (vendor_fix618.py) */\n"
+				"#define k618_for_each_tz_instance(tz, inst) \\\n"
+				"\tfor (struct thermal_trip_desc *__k618_td = (tz)->trips; \\\n"
+				"\t     __k618_td - (tz)->trips < (tz)->num_trips; __k618_td++) \\\n"
+				"\t\tlist_for_each_entry(inst, &__k618_td->thermal_instances, trip_node)\n"
+				"static inline int k618_thermal_zone_get_trip(struct thermal_zone_device *tz, int id,\n"
+				"\t\tstruct thermal_trip *trip)\n{\n"
+				"\tif (!tz || id < 0 || id >= tz->num_trips || !trip)\n\t\treturn -EINVAL;\n"
+				"\t*trip = tz->trips[id].trip;\n\treturn 0;\n}\n")
+		note(path, "thermal trip descriptors")
 	# alarm callbacks return void (6.18: enum alarmtimer_restart is gone). Every OnePlus/Qualcomm one
 	# returns ALARMTIMER_NORESTART -- none re-arms through its return value
 	if "enum alarmtimer_restart" in text and "ALARMTIMER_RESTART;" not in text:
