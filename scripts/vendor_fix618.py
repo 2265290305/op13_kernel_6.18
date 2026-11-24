@@ -127,6 +127,13 @@ RULES = [
 		r"#include <\1>"),
 	# cfs_rq.h_nr_running is h_nr_queued since 6.14 (h_nr_runnable leaves the delayed ones out)
 	("h_nr_queued", re.compile(r"\bh_nr_running\b"), "h_nr_queued"),
+	# the runnable ones without the delayed-dequeue ones: h_nr_runnable (6.14; h_nr_delayed is gone)
+	("h_nr_runnable", re.compile(r"\b([\w>.-]+?)->h_nr_queued\s*-\s*\1->h_nr_delayed\b"), r"\1->h_nr_runnable"),
+	# EEVDF's bookkeeping renamed (6.18): min_vruntime -> zero_vruntime, the weighted key sum and the
+	# weight behind avg_vruntime() -> sum_w_vruntime, sum_weight
+	("eevdf fields", re.compile(r"\b(cfs_rq|cfs)->min_vruntime\b"), r"\1->zero_vruntime"),
+	("eevdf fields", re.compile(r"\b(cfs_rq|cfs)->avg_vruntime\b"), r"\1->sum_w_vruntime"),
+	("eevdf fields", re.compile(r"\b(cfs_rq|cfs)->avg_load\b"), r"\1->sum_weight"),
 	# dma_fence_ops lost its debug printers (6.12); __dma_fence_is_later takes the fence first (6.13)
 	("dma-fence", re.compile(r"^[ \t]*\.(?:fence|timeline)_value_str\s*=\s*\w+\s*,[ \t]*\n", re.M), ""),
 	("dma-fence", re.compile(r"\b__dma_fence_is_later\(\s*([^,()]+?)\s*,\s*([^,()]+?)\s*,\s*(\w+)->ops\s*\)"),

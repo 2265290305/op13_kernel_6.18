@@ -45,6 +45,10 @@ soc_autoconf() {
 	     /^#ifndef CONFIG_DEVFREQ_GOV_QCOM_(ADRENO_TZ|GPUBW_MON)(_MODULE)?$/ { skip = 3 }
 	     skip { skip--; next } { print }' "$S/gen/autoconf_vendor.h" > "$1"
 	grep -q 'CONFIG_ARCH_SUN' "$1" || { echo "soc_autoconf: CONFIG_ARCH_SUN is not in the SoC configuration"; return 1; }
+	# OnePlus' feature switches for its own modules (device/op13/oplus-features.config): the SoC repo's
+	# sun configuration is Qualcomm's and has none; OnePlus' code is built as OnePlus builds it
+	awk -F= '/^CONFIG_/ { n = $1; if ($2 == "m") n = n "_MODULE"; printf "#ifndef %s\n#define %s 1\n#endif\n", n, n }' \
+		"$ROOT/device/op13/oplus-features.config" >> "$1"
 }
 
 # oplus_overlay DIR TREE: the SoC repo's include links into OnePlus' tree (include/soc/oplus/boot,

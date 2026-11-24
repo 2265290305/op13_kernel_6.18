@@ -62,6 +62,7 @@ prepare() {
 	for d in st nxp; do [ -d "$SRC/vendor/$d" ] && cp -r "$SRC/vendor/$d" "$T/vendor/"; done
 	for r in $QREPOS; do cp -r "$SRC/vendor/qcom/opensource/$r" "$T/vendor/qcom/opensource/"; done
 	# the definitions, read before the copy's fixes; OnePlus' macro file from that tree's kernel_platform
+	STOCK_CONFIG=$ROOT/device/op13/oplus-features.config \
 	BZL_KVER=$KV BZL_MACROS=$SRC/kernel_platform/oplus/bazel python3 -I "$ROOT/scripts/bzl_eval.py" "$T" "$P/modules.json" \
 		vendor/oplus $(for r in $QREPOS; do echo "vendor/qcom/opensource/$r"; done)
 	# this port's fixes first as well: some patterns the reference's sweep would take wrongly
