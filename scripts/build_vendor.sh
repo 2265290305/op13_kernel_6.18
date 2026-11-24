@@ -390,7 +390,9 @@ if [ -s "$ROOT/out/soc-dropped.txt" ] && [ -f "$S/Kbuild" ]; then
 	# modules.order ("The external module source tree is not clean": run 45427714881 built none of
 	# these), so it is set aside meanwhile
 	[ -f "$S/modules.order" ] && mv "$S/modules.order" "$W/soc-modules.order.saved"
-	LSYMS="$O/Module.symvers $S/Module.symvers $(find "$W" -name Module.symvers 2>/dev/null | tr '\n' ' ') \
+	# (not the kernel's own Module.symvers: modpost reads it itself, and twice is "exported twice"
+	# for every kernel symbol -- the late pass failed so in test-48, once it ran at all)
+	LSYMS="$S/Module.symvers $(find "$W" -name Module.symvers 2>/dev/null | tr '\n' ' ') \
 $(find "$ROOT/out/oplus" "$ROOT/out/extra" -name Module.symvers 2>/dev/null | tr '\n' ' ') \
 $(ls "$ROOT"/out/tp-log/*.symvers 2>/dev/null | tr '\n' ' ')"
 	while read -r m; do
