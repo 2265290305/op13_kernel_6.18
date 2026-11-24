@@ -102,7 +102,17 @@ prepare() {
 		f=$(sed -n -E 's#^[[:space:]]*\#[[:space:]]*define[[:space:]]+TRACE_INCLUDE_FILE[[:space:]]+([^[:space:]]+).*#\1#p' "$h" | head -1)
 		[ -n "$f" ] || f=$(basename "$h" .h)
 		[ -e "$(dirname "$h")/$f.h" ] || continue
-		sed -i -E "s#(define[[:space:]]+[A-Z0-9_]*TRACE_INCLUDE_PATH[[:space:]]+)\.[^[:space:]]*#\1$(dirname "$h")#" "$h"
+		# the path goes through the preprocessor: a component GNU C predefines as a macro (linux,
+		# unix: 1) would turn into "1" (Wi-Fi: "qca-wifi-host-cmn/qdf/1/src/qdf_tracepoint_defs.h
+		# not found"), so such a directory is reached through a link with a plain name
+		d=$(dirname "$h")
+		if echo "/$d/" | grep -qE '/(linux|unix|arm|aarch64|i386)/'; then
+			mkdir -p "$P/tracedirs"
+			n=$(ls "$P/tracedirs" | wc -l)
+			ln -sfn "$d" "$P/tracedirs/t$n"
+			d=$P/tracedirs/t$n
+		fi
+		sed -i -E "s#(define[[:space:]]+[A-Z0-9_]*TRACE_INCLUDE_PATH[[:space:]]+)\.[^[:space:]]*#\1$d#" "$h"
 	done
 	# the charger's generated IC tables (its Bazel rule oplus_chg_ic_cfg runs this script), where its
 	# header target (oplus_chg_v2_ic_cfg_headers) has them
