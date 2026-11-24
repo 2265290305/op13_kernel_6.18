@@ -516,6 +516,9 @@ def fix(path):
 
 def main(argv):
 	for top in argv[1:]:
+		if os.path.isfile(top):
+			fix(top)
+			continue
 		for dp, ds, fs in os.walk(top):
 			ds[:] = [d for d in ds if d != ".git"]
 			for f in fs:
