@@ -31,9 +31,20 @@ jobs:
       - name: Host packages
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq bc bison flex libssl-dev libelf-dev dwarves cpio lz4 zstd ccache kmod python3 \
-            clang-19 lld-19 llvm-19
+          sudo apt-get install -y -qq bc bison flex libssl-dev libelf-dev libdw-dev zlib1g-dev cmake cpio lz4 zstd \
+            ccache kmod python3 clang-19 lld-19 llvm-19
           /usr/lib/llvm-19/bin/clang --version | head -1
+          # pahole (the kernel's BTF): Ubuntu 24.04's 1.25 stops at 4096 per-CPU variables and writes
+          # BTF 6.18's resolve_btfids refuses ("load BTF from vmlinux.unstripped: Invalid argument",
+          # run 45375007648); 1.30 from its release tag
+          git clone -q --depth 1 --branch v1.30 --recurse-submodules --shallow-submodules \
+            https://github.com/acmel/dwarves /tmp/dwarves
+          cmake -S /tmp/dwarves -B /tmp/dwarves/build -DCMAKE_BUILD_TYPE=Release -D__LIB=lib \
+            -DCMAKE_INSTALL_PREFIX=/usr/local > /dev/null
+          make -C /tmp/dwarves/build -j"$(nproc)" > /dev/null
+          sudo make -C /tmp/dwarves/build install > /dev/null
+          sudo ldconfig
+          pahole --version
 
       - name: Sources
         run: bash scripts/fetch.sh
