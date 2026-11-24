@@ -233,19 +233,38 @@ EDITS = [
      "/* op13: 6.18's rwsem.h declares these (scripts/oplus_fix.py) */\n"
      "#define rwsem_owner k618_rwsem_owner\n#define is_rwsem_reader_owned k618_is_rwsem_reader_owned\n"
      "static inline struct task_struct *rwsem_owner(struct rw_semaphore *sem)\n"),
+    # cnss2 (the OnePlus 13's, which its DT matches) for the OnePlus 15's Wi-Fi driver, which calls
+    # two 6.12 platform functions it lacks: the chip name is not needed by this cnss2 (it picks
+    # its firmware itself), and the OnePlus 13 has no TSF GPIO in its DT
+    ("cnss2/main.c",
+     "EXPORT_SYMBOL(cnss_remove_pm_qos);\n",
+     "EXPORT_SYMBOL(cnss_remove_pm_qos);\n\n"
+     "/* op13: what the OnePlus 15's qcacld calls (scripts/oplus_fix.py) */\n"
+     "struct cnss_wlan_host_param;\n"
+     "int cnss_set_host_param(struct device *dev, struct cnss_wlan_host_param *param)\n"
+     "{\n\treturn 0;\n}\nEXPORT_SYMBOL(cnss_set_host_param);\n\n"
+     "int cnss_get_wlan_tsf_gpio(struct device *dev)\n{\n\treturn -EINVAL;\n}\n"
+     "EXPORT_SYMBOL(cnss_get_wlan_tsf_gpio);\n",
+     "cnss_set_host_param"),
 ]
 
 
 def main(argv):
     n = 0
     for dp, _dn, fns in os.walk(argv[1]):
-        for name, old, new in EDITS:
-            if name not in fns:
+        for edit in EDITS:
+            name, old, new = edit[:3]
+            unless = edit[3] if len(edit) > 3 else None
+            # a name with a directory part matches files whose path ends with it
+            base = os.path.basename(name)
+            if base not in fns or ("/" in name and not os.path.join(dp, base).endswith("/" + name)):
                 continue
-            path = os.path.join(dp, name)
+            path = os.path.join(dp, base)
             text = open(path, encoding="utf-8", errors="surrogateescape").read()
             if new and new in text:
                 continue		# already applied (some edits keep the old text inside the new)
+            if unless and unless in text:
+                continue		# the file has it already (the OnePlus 15's copy)
             if old in text:
                 open(path, "w", encoding="utf-8", errors="surrogateescape", newline="").write(text.replace(old, new))
                 n += 1
