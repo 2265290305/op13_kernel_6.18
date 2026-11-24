@@ -346,10 +346,28 @@ def grep_genrule(name, outs, cmd):
 	return True
 
 
+def printf_genrule(name, outs, cmd):
+	"""a genrule that only prints #defines of strings (camera's banner: CAMERA_COMPILE_TIME/_BY/_HOST
+	from date, whoami, uname -n): the same defines, fixed values (the build stays reproducible and
+	its compiles cached). Returns whether it was one."""
+	defs = re.findall(r"printf\s+'#define\s+(\w+)\s+\"%s\"(?:\\n|\n)'", cmd or "")
+	if not defs or len(defs) != (cmd or "").count("printf"):
+		return False
+	pkg = CUR["pkg"]
+	for o in list(outs or [])[:1]:
+		rel = os.path.normpath(os.path.join(".bzl_gen", pkg, o))
+		os.makedirs(os.path.dirname(os.path.join(ROOT, rel)), exist_ok=True)
+		with open(os.path.join(ROOT, rel), "w") as fh:
+			fh.write("".join('#define %s "op13"\n' % d for d in defs))
+		for key in list(outs or []) + ([name] if name else []):
+			GENRULES[os.path.normpath(os.path.join(pkg, key))] = [rel]
+	return True
+
+
 def genrule(name=None, outs=(), srcs=(), cmd="", **kw):
 	"""native.genrule: the ones that concatenate their sources (dataipa's pipes them through
 	sed -e 's/^export //g', which the defconfig reader does itself), and Wi-Fi's kernel probe."""
-	if grep_genrule(name, outs, cmd):
+	if grep_genrule(name, outs, cmd) or printf_genrule(name, outs, cmd):
 		return
 	if not re.fullmatch(r"\s*cat\s+\$\(SRCS\)\s*(?:\|\s*sed\s+-e\s+'s/\^export //g?'\s*)?>\s*\$@\s*", cmd or ""):
 		return
@@ -361,6 +379,11 @@ def genrule(name=None, outs=(), srcs=(), cmd="", **kw):
 
 def ddk_headers(name, hdrs=(), includes=(), linux_includes=(), **kw):
 	pkg = CUR["pkg"]
+	# a header target of one generated file stands for that file in $(location ...) (camera_banner)
+	gen = [GENRULES.get(os.path.normpath(os.path.join(*label_to_path(pkg, h)))) for h in (hdrs or [])
+		if isinstance(h, str) and h.startswith(":")]
+	if len(gen) == 1 and gen[0] and len(gen[0]) == 1:
+		GENRULES[os.path.normpath(os.path.join(pkg, name))] = gen[0]
 	headers["%s:%s" % (pkg, name)] = {
 		"package": pkg,
 		"includes": [os.path.normpath(os.path.join(pkg, i)) for i in includes or ()],
