@@ -424,7 +424,9 @@ def fix(path):
 				(r"\bstruct\s+platform_device_id\b", "linux/mod_devicetable.h"),
 				(r"\bstruct\s+platform_(?:device|driver)\b", "linux/platform_device.h"),
 				(r"\balarmtimer_restart\b|\bstruct\s+alarm\b", "linux/alarmtimer.h"),
-				(r"\bwakeup_source_(?:add|remove|create|register)\s*\(", "linux/pm_wakeup.h"),
+				# (wakeup sources: <linux/device.h>, which includes pm_wakeup.h; that one must not be
+				# included on its own -- doing so broke audio's gpr and every module after it)
+				(r"\bwakeup_source_(?:add|remove|create|register)\s*\(", "linux/device.h"),
 				(r"\bdevm_gpio_request(?:_one)?\s*\(", "linux/gpio.h")):
 			text, did = include_if(text, used, header)
 			if did:
