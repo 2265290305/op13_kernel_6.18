@@ -241,6 +241,50 @@ PY
 	echo "bpf load report added"
 fi
 
+# android_vh_thermal_pm_notify_suspend, as android16-6.12 has it: a vendor module may keep a thermal
+# zone running through suspend (its interrupt wakes the phone). Qualcomm's qti_thermal_vendor_hooks
+# (stock first stage) marks every zone so; without the hook it does not build (the SoC build
+# dropped it) and every zone stops at suspend.
+TH=$C/include/trace/hooks/thermal.h
+TC=$C/drivers/thermal/thermal_core.c
+VH=$C/drivers/android/vendor_hooks.c
+if ! grep -q 'android_vh_thermal_pm_notify_suspend' $TH; then
+	python3 -I - "$TH" "$TC" "$VH" <<'PY'
+import sys
+th, tc, vh = sys.argv[1:4]
+def edit(path, old, new, n=1):
+	t = open(path).read()
+	assert t.count(old) == n, (path, old, t.count(old))
+	open(path, "w").write(t.replace(old, new))
+edit(th, "#include <trace/hooks/vendor_hooks.h>\n",
+     "#include <trace/hooks/vendor_hooks.h>\n\nstruct thermal_zone_device;\n")
+edit(th, "#endif /* _TRACE_HOOK_THERMAL_H */",
+     "/* op13: as android16-6.12 (tools/prep_common.sh) */\n"
+     "DECLARE_HOOK(android_vh_thermal_pm_notify_suspend,\n"
+     "\tTP_PROTO(struct thermal_zone_device *tz, int *irq_wakeable),\n"
+     "\tTP_ARGS(tz, irq_wakeable));\n\n#endif /* _TRACE_HOOK_THERMAL_H */")
+edit(vh, "EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_enable_thermal_genl_check);\n",
+     "EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_enable_thermal_genl_check);\n"
+     "EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_thermal_pm_notify_suspend);\t/* op13 */\n")
+t = open(tc).read()
+if "#include <trace/hooks/thermal.h>" not in t:
+	# ahead of CREATE_TRACE_POINTS: vendor_hooks.c defines the hook, this file only calls it
+	edit(tc, "#define CREATE_TRACE_POINTS\n#include \"thermal_trace.h\"\n",
+	     "#include <trace/hooks/thermal.h>\t/* op13 */\n#define CREATE_TRACE_POINTS\n#include \"thermal_trace.h\"\n")
+edit(tc, "\tlist_for_each_entry(tz, &thermal_tz_list, node)\n\t\tthermal_zone_pm_prepare(tz);\n",
+     "\tlist_for_each_entry(tz, &thermal_tz_list, node) {\n\t\tint irq_wakeable = 0;\n\n"
+     "\t\ttrace_android_vh_thermal_pm_notify_suspend(tz, &irq_wakeable);\t/* op13 */\n"
+     "\t\tif (irq_wakeable)\n\t\t\tcontinue;\n\t\tthermal_zone_pm_prepare(tz);\n\t}\n")
+edit(tc, "\tlist_for_each_entry(tz, &thermal_tz_list, node)\n\t\tthermal_zone_pm_complete(tz);\n",
+     "\tlist_for_each_entry(tz, &thermal_tz_list, node) {\n\t\tint irq_wakeable = 0;\n\n"
+     "\t\ttrace_android_vh_thermal_pm_notify_suspend(tz, &irq_wakeable);\t/* op13 */\n"
+     "\t\tif (irq_wakeable)\n\t\t\tcontinue;\n\t\tthermal_zone_pm_complete(tz);\n\t}\n")
+PY
+	grep -q 'android_vh_thermal_pm_notify_suspend' $TH && grep -q 'trace_android_vh_thermal_pm_notify_suspend' $TC \
+		|| { echo "thermal pm_notify_suspend hook: edit failed"; exit 1; }
+	echo "android_vh_thermal_pm_notify_suspend added"
+fi
+
 # op13_deadline=<seconds>: a boot that has not started zygote by then logs where every blocked task
 # waits and every CPU's stack, for the ramoops log a Power+VolUp reset keeps. Once zygote has run,
 # it does nothing.
