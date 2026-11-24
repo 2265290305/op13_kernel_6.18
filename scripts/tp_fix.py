@@ -18,7 +18,11 @@ import sys
 DEVICE = re.compile(r"xiaomi|\bmi_|k618_mi|mi_disp|ultra|nuwa|ishtar|fuxi|kalama|madrid|panel_id"
                     r"|-515|_515|k618_ois|k618_park|5\.15|5_15", re.I)
 # the smcinvoke ABI the reference narrowed to 5.15's (both copies of the header)
-SKIP_FILES = ("securemsm-kernel/include/uapi/linux/smcinvoke.h", "securemsm-kernel/include/linux/smcinvoke.h")
+SKIP_FILES = ("securemsm-kernel/include/uapi/linux/smcinvoke.h", "securemsm-kernel/include/linux/smcinvoke.h",
+              # the camera interconnect lookup redirected for Xiaomi's 5.15 DT: its wrapper is skipped
+              # as 5.15-specific, its rename was not -- camera lost cam_soc_bus_client_register
+              # (test-48). The OnePlus 13's DT (a 6.6 one) has the path names 6.5+ needs.
+              "camera-kernel/drivers/cam_utils/cam_soc_icc.c")
 SKIP_GENERATED = ("display-drivers/msm/mi_disp_k618.c", "display-drivers/msm/mi_disp_k618.h")
 SKIP_REPOS = ("video-driver-515", "eva-kernel-515")
 
