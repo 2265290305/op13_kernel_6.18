@@ -335,6 +335,39 @@ if [ "$n" -gt 0 ]; then
 	build "$P2" "$W/wanted2.txt" vendor/oplus vendor/qcom/opensource
 fi
 
+# late SoC modules: the SoC build drops what does not link, and some SoC modules link against
+# OnePlus' (on the OnePlus 13 the charger, oplus_chg_v2, exports qti_battery_charger_get_prop and
+# register_hboost_event_notifier, which the flash LEDs and qcom-hv-haptics use) -- built before
+# OnePlus' existed. Each dropped one that is still wanted is tried once more, alone, against
+# everything built by now (its objects in out/soc-late, the SoC tree's own Kbuild put back after).
+still_wanted "$W/wanted-late.txt" > /dev/null
+if [ -s "$ROOT/out/soc-dropped.txt" ] && [ -f "$S/Kbuild" ]; then
+	cp "$S/Kbuild" "$W/soc-Kbuild.saved"
+	LSYMS="$O/Module.symvers $S/Module.symvers $(find "$W" -name Module.symvers 2>/dev/null | tr '\n' ' ') \
+$(find "$ROOT/out/oplus" "$ROOT/out/extra" -name Module.symvers 2>/dev/null | tr '\n' ' ') \
+$(ls "$ROOT"/out/tp-log/*.symvers 2>/dev/null | tr '\n' ' ')"
+	while read -r m; do
+		k=$(basename "$m" | tr '-' '_')
+		grep -qx "$k.ko" "$W/wanted-late.txt" || continue
+		MO=$ROOT/out/soc-late/$k
+		rm -rf "$MO" && mkdir -p "$MO"
+		python3 -I "$REF/k618_soc_kbuild.py" kbuild "$S" "$ROOT/out/soc-kconfig/.config" "$O/.config" "$m" \
+			> "$LOG/soc-late-$k.log" 2>&1 || continue
+		set +e
+		"${KMAKE[@]}" M="$S" MO="$MO" -j"$J" modules KBUILD_EXTRA_SYMBOLS="$LSYMS" >> "$LOG/soc-late-$k.log" 2>&1
+		set -e
+		ko=$(find "$MO" -name "$(basename "$m").ko" | head -1)
+		if [ -n "$ko" ]; then
+			echo "build_vendor: $k: built (SoC, after OnePlus' modules)" | tee -a "$LOG/summary.txt"
+			cp "$ko" "$OUTM/"; ok=$((ok + 1))
+		else
+			echo "build_vendor: $k: FAILED (SoC, late)" | tee -a "$LOG/summary.txt"
+			grep -E ': (fatal )?error: |^ERROR: modpost' "$LOG/soc-late-$k.log" | head -4 | tee -a "$LOG/summary.txt" || true
+		fi
+	done < "$ROOT/out/soc-dropped.txt"
+	cp "$W/soc-Kbuild.saved" "$S/Kbuild"
+fi
+
 n=$(still_wanted "$LOG/failed.txt")
 ls "$OUTM" | sed 's/\.ko$//' > "$ROOT/out/vendormods.list"
 echo "build_vendor: built $ok; not built: $n (failed.txt)" | tee -a "$LOG/summary.txt"
