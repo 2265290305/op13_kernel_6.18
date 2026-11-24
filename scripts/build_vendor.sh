@@ -76,7 +76,7 @@ prepare() {
 	# trace headers name their own directory relative to the kernel's include/trace, in their tree's
 	# layout (../../../vendor/..., ../../kernel/oplus_cpu/...): each relative one becomes the absolute
 	# directory of the header that defines it
-	grep -rlZ --include='*.h' -E 'define[[:space:]]+[A-Z0-9_]*TRACE_INCLUDE_PATH[[:space:]]+\.' "$T" | while IFS= read -r -d '' h; do
+	grep -rlZ --include='*.h' --include='*.c' -E 'define[[:space:]]+[A-Z0-9_]*TRACE_INCLUDE_PATH[[:space:]]+\.' "$T" | while IFS= read -r -d '' h; do
 		sed -i -E "s#(define[[:space:]]+[A-Z0-9_]*TRACE_INCLUDE_PATH[[:space:]]+)\.[^[:space:]]*#\1$(dirname "$h")#" "$h"
 	done
 	# the charger's generated IC tables (its Bazel rule oplus_chg_ic_cfg runs this script), where its
@@ -110,6 +110,11 @@ prepare() {
 	lnk soc/oplus/system/oplus_trace_sensor.h "$T/vendor/oplus/sensor/kernel/oplus_trace_sensor/oplus_trace_sensor.h"
 	lnk linux/oplus_kevent.h "$K/secureguard/gki2.0/rootguard_new/oplus_kevent.h"
 	lnk linux/pogo_common.h "$K/device_info/pogo_keyboard/pogo_common.h"
+	lnk soc/oplus/oplus_trackpoint_report.h "$T/vendor/qcom/opensource/display-drivers/oplus/common/trackpoint/oplus_trackpoint_report.h"
+	lnk st_uapi.h "$T/vendor/st/opensource/driver/include/uapi/linux/nfc/st_uapi.h"
+	# the UFS trace events moved into the UFS core (6.x): by their old path
+	lnk trace/events/ufs.h "$C/drivers/ufs/core/ufs_trace.h"
+	lnk trace/events/ufs_trace_types.h "$C/drivers/ufs/core/ufs_trace_types.h"
 	# OnePlus' cpu tree as its kernel has it (kernel/oplus_cpu): includes of "../kernel/oplus_cpu/..."
 	# resolve from the include directory above
 	mkdir -p "$P/kernel" && ln -sfn "$K/cpu" "$P/kernel/oplus_cpu"
@@ -149,7 +154,7 @@ PY
 				MO=$P/obj/$name
 				mkdir -p "$MO"
 				"${KMAKE[@]}" M="$T/$pkg" MO="$MO" OPMOD="$base" modules -j1 KBUILD_EXTRA_SYMBOLS="$SYMS" \
-					NOSTDINC_FLAGS="-nostdinc -I$S/include -I$P/inc -idirafter $W/inc8750 -idirafter $C" \
+					NOSTDINC_FLAGS="-nostdinc -I$S/include -I$S/include/uapi -I$P/inc -idirafter $W/inc8750 -idirafter $C" \
 					KCFLAGS="-Wno-error -include $CONF" > "$LOG/$(basename "$P")-$name.log" 2>&1
 				echo "$? $MO/$base.ko" > "$MO/.result"
 			) < /dev/null &
@@ -208,7 +213,7 @@ PY
 		set +e
 		# shellcheck disable=SC2086
 		"${KMAKE[@]}" M="$T/$dir" MO="$MO" modules -j"$J" KBUILD_EXTRA_SYMBOLS="$MO/extra.symvers" $vars \
-			NOSTDINC_FLAGS="-nostdinc -I$S/include -I$P/inc -idirafter $W/inc8750 -idirafter $C" \
+			NOSTDINC_FLAGS="-nostdinc -I$S/include -I$S/include/uapi -I$P/inc -idirafter $W/inc8750 -idirafter $C" \
 			KCFLAGS="-Wno-error -include $CONF $defs" > "$LOG/$tag.log" 2>&1
 		rc=$?
 		set -e

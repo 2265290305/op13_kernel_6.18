@@ -53,7 +53,26 @@ def find_body(text, start):
 	return None
 
 
+def wrap_external_remove(text, path):
+	"""a platform_driver whose .remove is defined in another file (still returning int there): a
+	void wrapper here that calls it."""
+	for blk in re.finditer(r"^(?:static\s+)?(?:const\s+)?struct\s+platform_driver\s+\w+\s*=\s*\{.*?\n\};", text, re.S | re.M):
+		m = re.search(r"\.remove\s*=\s*(\w+)\s*,", blk.group(0))
+		if not m or m.group(1).startswith("k618_"):
+			continue
+		f = m.group(1)
+		if re.search(r"\b(?:int|void)\s+(?:__exit\s+)?%s\s*\(\s*struct\s+platform_device" % re.escape(f), text):
+			continue		# defined (or declared) here: fix_platform_remove's
+		wrap = ("/* 6.18: platform_driver.remove returns void (vendor_fix618.py) */\n"
+			"static void k618_remove_%s(struct platform_device *pdev)\n{\n\t%s(pdev);\n}\n\n") % (f, f)
+		newblk = blk.group(0).replace(m.group(0), m.group(0).replace(f, "k618_remove_" + f), 1)
+		text = text.replace(blk.group(0), wrap + newblk, 1)
+		note(path, "platform remove (wrapper)")
+	return text
+
+
 def fix_platform_remove(text, path):
+	text = wrap_external_remove(text, path)
 	names = set(re.findall(r"\.remove\s*=\s*(?:__exit_p\(\s*)?(\w+)", text))
 	for name in names:
 		sig = re.compile(r"(static\s+)?int\s+(__exit\s+)?" + re.escape(name) +
@@ -251,11 +270,24 @@ def fix_callbacks(path, text):
 	# bus_type.match takes a const struct device_driver (6.11)
 	names = set(re.findall(r"\.match\s*=\s*(\w+)\s*,", text))
 	text = const_param(text, names, r"(?<!const )\bstruct\s+device_driver\s*\*", "const struct device_driver *")
-	# snd_soc_dai_ops: set_channel_map's slot arrays and get_channel_map's dai are const (6.11)
-	names = set(re.findall(r"\.set_channel_map\s*=\s*(\w+)\s*,", text))
-	text = const_param(text, names, r"(?<!const )\bunsigned\s+int\s*\*", "const unsigned int *")
-	names = set(re.findall(r"\.get_channel_map\s*=\s*(\w+)\s*,", text))
-	text = const_param(text, names, r"^(\s*)(?<!const )struct\s+snd_soc_dai\s*\*", r"\1const struct snd_soc_dai *")
+	# snd_soc_dai_ops: set_channel_map's slot arrays and get_channel_map's dai are const (6.11): a
+	# wrapper of the new type in front of each (the functions themselves pass them on as they were)
+	for op, wrap in (("set_channel_map",
+			"static int k618_%(f)s(struct snd_soc_dai *dai, unsigned int tx_num, const unsigned int *tx_slot,\n"
+			"\t\tunsigned int rx_num, const unsigned int *rx_slot)\n{\n"
+			"\treturn %(f)s(dai, tx_num, (unsigned int *)tx_slot, rx_num, (unsigned int *)rx_slot);\n}\n\n"),
+			("get_channel_map",
+			"static int k618_%(f)s(const struct snd_soc_dai *dai, unsigned int *tx_num, unsigned int *tx_slot,\n"
+			"\t\tunsigned int *rx_num, unsigned int *rx_slot)\n{\n"
+			"\treturn %(f)s((struct snd_soc_dai *)dai, tx_num, tx_slot, rx_num, rx_slot);\n}\n\n")):
+		for f in set(re.findall(r"\.%s\s*=\s*(\w+)\s*," % op, text)):
+			if f.startswith("k618_"):
+				continue
+			m = re.search(r"^static\s+(?:const\s+)?struct\s+snd_soc_dai_ops\b", text, re.M)
+			if not m:
+				continue
+			text = text[:m.start()] + wrap % {"f": f} + text[m.start():]
+			text = re.sub(r"(\.%s\s*=\s*)%s\s*," % (op, re.escape(f)), r"\1k618_%s," % f, text)
 	if text != orig:
 		note(path, "const callbacks")
 	return text
@@ -268,6 +300,10 @@ DEVM_GPIO = (
 	"static int k618_devm_gpio_request(struct device *dev, unsigned int gpio, const char *label)\n{\n"
 	"\tint rc = gpio_request(gpio, label);\n\n\tif (rc)\n\t\treturn rc;\n"
 	"\treturn devm_add_action_or_reset(dev, k618_devm_gpio_free, (void *)(unsigned long)gpio);\n}\n")
+
+
+# functions kernel/sched/sched.h has in 6.18 that OnePlus' 6.6 files carry their own copies of
+SCHED_H_FUNCS = ("css_tg", "uclamp_bucket_id")
 
 
 def fix(path):
@@ -302,12 +338,18 @@ def fix(path):
 			text = text2
 	# kernel/sched/sched.h has css_tg() since 6.7: a file that includes it drops its own copy
 	if "kernel/sched/sched.h" in text:
-		text2 = re.sub(r"static\s+inline\s+struct\s+task_group\s*\*\s*css_tg\s*\(\s*struct\s+cgroup_subsys_state\s*\*\s*\w+\s*\)\s*\{[^{}]*\}\n",
-			"/* css_tg(): kernel/sched/sched.h has it in 6.18 (vendor_fix618.py) */\n", text)
-		if text2 != text:
-			note(path, "css_tg")
-			text = text2
+		for fn in SCHED_H_FUNCS:
+			text2 = re.sub(r"^(?:static\s+)?(?:inline\s+)?[\w \t\*]*?\b%s\s*\([^)]*\)\s*\{(?:[^{}]|\{[^{}]*\})*\}\n" % fn,
+				"/* %s(): kernel/sched/sched.h has it in 6.18 (vendor_fix618.py) */\n" % fn, text, flags=re.M)
+			if text2 != text:
+				note(path, "sched.h " + fn)
+				text = text2
 	text = fix_assign_str(path, text)
+	# OnePlus' oplus_project.h uses int32_t and friends with no header for them (6.6 had it through
+	# whatever came before)
+	if path.endswith("boot/include/oplus_project.h") and "#include <linux/types.h>" not in text:
+		text = text.replace("#define _OPLUS_PROJECT_H_\n", "#define _OPLUS_PROJECT_H_\n#include <linux/types.h>\n", 1)
+		note(path, "include linux/types.h")
 	# OnePlus' project info (get_eng_version, FACTORY, AGING ...) used where its header is included only
 	# under some option (Wi-Fi's cnss2/debug.h: inside IPC_LOGGING): included unconditionally too
 	if re.search(r"\bget_eng_version\s*\(", text) and "soc/oplus/system/oplus_project.h" in text \
@@ -342,7 +384,9 @@ def fix(path):
 		# a function pointer to the snd_soc_unregister_component macro
 		if re.search(r"\bsnd_soc_unregister_component\b(?!\s*\()", text):
 			text = re.sub(r"\bsnd_soc_unregister_component\b(?!\s*\()", "k618_snd_soc_unregister_component", text)
-			m = list(re.finditer(r"^#include\s*[<\"].*$", text, re.M))
+			# after the last #include before its first use (some files include more further down)
+			first = text.index("k618_snd_soc_unregister_component")
+			m = [x for x in re.finditer(r"^#include\s*[<\"].*$", text, re.M) if x.end() < first]
 			at = m[-1].end() if m else 0
 			text = (text[:at] + "\n/* 6.18: snd_soc_unregister_component() is a macro (vendor_fix618.py) */\n"
 				"static void k618_snd_soc_unregister_component(struct device *dev)\n"
@@ -350,6 +394,7 @@ def fix(path):
 			note(path, "snd_soc_unregister_component")
 		for used, header in ((r"\bv(?:malloc|zalloc|free)\s*\(", "linux/vmalloc.h"),
 				(r"\bstruct\s+platform_device_id\b", "linux/mod_devicetable.h"),
+				(r"\bstruct\s+platform_(?:device|driver)\b", "linux/platform_device.h"),
 				(r"\bdevm_gpio_request(?:_one)?\s*\(", "linux/gpio.h")):
 			text, did = include_if(text, used, header)
 			if did:

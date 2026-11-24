@@ -47,7 +47,7 @@ fetch_sparse() {
 	mkdir -p "$path"
 	git -C "$path" init -q
 	git -C "$path" remote add origin "$url" 2> /dev/null || true
-	git -C "$path" sparse-checkout set --no-cone $(for d in $MSM8750_DIRS; do echo "/$d/"; done)
+	git -C "$path" sparse-checkout set --no-cone $(for d in $MSM8750_DIRS; do echo "/$d"; done)
 	git -C "$path" fetch -q --depth 1 --no-tags --filter=blob:none origin "$rev"
 	git -C "$path" -c advice.detachedHead=false checkout -q FETCH_HEAD
 	echo "$path: $(git -C "$path" rev-parse --short HEAD) (sparse)"
