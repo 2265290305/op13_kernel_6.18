@@ -169,6 +169,14 @@ def ddk_module(name, srcs=(), out=None, local_defines=None, copts=None, includes
 				if m:
 					conf[m.group(1)] = m.group(2).strip('"')
 					defs.append((m.group(1), m.group(2).strip('"')))
+	# the module's own Kconfig: its bool options that default to y, where their dependencies hold,
+	# as Kleaf applies them (datarmnet's RMNET_LA_PLATFORM: without it rmnet_ctl.h's inline stubs
+	# clashed with rmnet_ctl_client.c, run 45427714881)
+	for f in (resolve_files(pkg, kconfig) if kconfig else []):
+		for opt in kconfig_defaults(os.path.join(ROOT, f), conf):
+			if opt not in conf:
+				conf[opt] = "y"
+				defs.append((opt, "y"))
 	def record(name, out, srcs, conditional_srcs, deps, includes, linux_includes, local_defines,
 			copts, hdrs):
 		files = list(srcs or [])
@@ -184,7 +192,7 @@ def ddk_module(name, srcs=(), out=None, local_defines=None, copts=None, includes
 			"package": pkg, "name": name, "out": out or name + ".ko",
 			"srcs": [s for s in files if isinstance(s, str)],
 			"includes": list(includes or []), "linux_includes": list(linux_includes or []),
-			"local_defines": list(local_defines or []), "copts": list(copts or []),
+			"local_defines": list(local_defines or []), "copts": [resolve_location(pkg, c) for c in copts or []],
 			"deps": ko,
 			"hdrs": ["%s:%s" % label_to_path(pkg, h) for h in (hdrs or []) if isinstance(h, str) and
 				(h.startswith(":") or h.startswith("//"))],
@@ -221,6 +229,59 @@ def ddk_submodule(name, srcs=(), out=None, deps=(), local_defines=(), copts=(), 
 		"conditional_srcs": conditional_srcs}
 
 
+def kconfig_defaults(path, conf):
+	"""CONFIG_ names of a Kconfig file's bool options with an unconditional "default y" (or
+	"def_bool y") whose "depends on" lines all hold in conf; an expression beyond symbols, !, &&, ||
+	and parentheses counts as not holding."""
+	blocks, cur = [], None
+	for line in open(path, errors="ignore"):
+		t = line.strip()
+		m = re.match(r"(?:menu)?config\s+(\w+)$", t)
+		if m:
+			cur = {"name": m.group(1), "type": None, "default": False, "deps": []}
+			blocks.append(cur)
+			continue
+		if cur is None:
+			continue
+		if re.match(r"(bool|tristate|string|int|hex)\b", t):
+			cur["type"] = t.split()[0]
+		elif re.match(r"def_bool\s+y\s*$", t):
+			cur["type"], cur["default"] = "bool", True
+		elif re.match(r"default\s+y\s*$", t):
+			cur["default"] = True
+		elif t.startswith("depends on "):
+			cur["deps"].append(t[len("depends on "):])
+		elif re.match(r"(endmenu|endif|if |menu |choice|endchoice|source )", t):
+			cur = None
+
+	def holds(expr):
+		if not re.fullmatch(r"[\w\s!&|()]*", expr):
+			return False
+		py = re.sub(r"\b([A-Za-z_]\w*)\b",
+			lambda m: str(conf.get("CONFIG_" + m.group(1), "n") in ("y", "m")), expr)
+		py = py.replace("&&", " and ").replace("||", " or ").replace("!", " not ")
+		try:
+			return bool(eval(py, {"__builtins__": {}}, {}))
+		except Exception:
+			return False
+	return ["CONFIG_" + b["name"] for b in blocks
+		if b["type"] == "bool" and b["default"] and all(holds(d) for d in b["deps"])]
+
+
+def resolve_location(pkg, c):
+	"""a copt "$(location <label>)" of a generated file this run knows: its path in the tree
+	(vendor_kbuild.py drops the ones left, with the -include before them)"""
+	if not isinstance(c, str):
+		return c
+	m = re.fullmatch(r"\$\(location\s+([^)\s]+)\)", c.strip())
+	if m:
+		p, n = label_to_path(pkg, m.group(1))
+		f = GENRULES.get(os.path.normpath(os.path.join(p, n)))
+		if f and len(f) == 1:
+			return os.path.join(ROOT, f[0])
+	return c
+
+
 def resolve_files(pkg, x):
 	"""a label or a list of them -> package paths: files, or what a genrule that concatenates files
 	(Wi-Fi's defconfigs: cat $(SRCS) > $@) makes them from."""
@@ -254,9 +315,42 @@ def write_file(name=None, out=None, content=(), **kw):
 		GENRULES[os.path.normpath(os.path.join(pkg, o))] = [rel]
 
 
+# the kernel the modules are built against: Bazel's //common
+KSRC = os.environ.get("BZL_KSRC") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src", "common")
+
+
+def grep_genrule(name, outs, cmd):
+	"""Wi-Fi's feature probe: a genrule that greps the kernel's sources (grep -qF "<pattern>"
+	$(location //common:<file>)) and writes "#define <flag> (1)" for each one found into a header
+	its modules -include. Run here against the 6.18 kernel, so Wi-Fi gets the 6.18 cfg80211 paths
+	(CFG80211_MLO_KEY_OPERATION_SUPPORT: the key ops with link_id). Returns whether it was one."""
+	probes = re.findall(r'grep\s+-qF\s+"([^"]*)"\s+\$\(location\s+//common:([^)\s]+)\)\s*;\s*then\s*'
+		r'echo\s+"([^"]*)"\s*>>\s*"?\$@"?', cmd or "")
+	if not probes:
+		return False
+	pkg = CUR["pkg"]
+	lines = []
+	for pattern, f, line in probes:
+		try:
+			if pattern in open(os.path.join(KSRC, f), errors="ignore").read():
+				lines.append(line)
+		except OSError:
+			pass
+	for o in list(outs or [])[:1]:
+		rel = os.path.normpath(os.path.join(".bzl_gen", pkg, o))
+		os.makedirs(os.path.dirname(os.path.join(ROOT, rel)), exist_ok=True)
+		with open(os.path.join(ROOT, rel), "w") as fh:
+			fh.write("\n".join(lines) + "\n")
+		for key in list(outs or []) + ([name] if name else []):
+			GENRULES[os.path.normpath(os.path.join(pkg, key))] = [rel]
+	return True
+
+
 def genrule(name=None, outs=(), srcs=(), cmd="", **kw):
-	"""native.genrule: only the ones that concatenate their sources are understood (dataipa's
-	pipes them through sed -e 's/^export //g', which the defconfig reader does itself)."""
+	"""native.genrule: the ones that concatenate their sources (dataipa's pipes them through
+	sed -e 's/^export //g', which the defconfig reader does itself), and Wi-Fi's kernel probe."""
+	if grep_genrule(name, outs, cmd):
+		return
 	if not re.fullmatch(r"\s*cat\s+\$\(SRCS\)\s*(?:\|\s*sed\s+-e\s+'s/\^export //g?'\s*)?>\s*\$@\s*", cmd or ""):
 		return
 	pkg = CUR["pkg"]
