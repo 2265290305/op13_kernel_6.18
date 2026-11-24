@@ -618,6 +618,19 @@ def fix(path):
 		if text2 != text:
 			note(path, "sched_stat_runtime")
 			text = text2
+	# plist_node_init() without <linux/plist.h>, which 6.6's headers pulled in (OnePlus 13's
+	# sched_assist sa_common.h)
+	text, did = include_if(text, r"\bplist_(?:node_init|head_init|add|del)\s*\(", "linux/plist.h")
+	if did:
+		note(path, "include linux/plist.h")
+	# a driver's .remove that is __exit: modpost rejects the reference from the driver structure
+	# (a section mismatch is an error in 6.18: fpga_monitor); an ordinary function, as remove is
+	for name in set(re.findall(r"\.remove\s*=\s*__exit_p\(\s*(\w+)\s*\)", text)):
+		text2 = re.sub(r"\.remove\s*=\s*__exit_p\(\s*%s\s*\)" % name, ".remove = %s" % name, text)
+		text2 = re.sub(r"(\b(?:static\s+)?(?:int|void)\s+)__exit\s+(%s\s*\()" % name, r"\1\2", text2)
+		if text2 != text:
+			note(path, "__exit remove")
+			text = text2
 	# page_mapcount() is gone (6.15): a page's folio's mapcount
 	text2 = re.sub(r"\bpage_mapcount\(\s*(\w+)\s*\)", r"folio_mapcount(page_folio(\1))", text)
 	if text2 != text:
