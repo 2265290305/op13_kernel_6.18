@@ -455,6 +455,13 @@ def fix(path):
 		if text2 != text:
 			note(path, "try_to_free_mem_cgroup_pages")
 			text = text2
+	# bus match callbacks take a const driver (6.11): the bus's to_<x>_driver() helpers have to take
+	# one too (Qualcomm's soundwire: swr_device_match -> to_swr_driver) -- container_of drops it
+	text2 = re.sub(r"(static\s+inline\s+struct\s+\w+\s*\*\s*to_\w+_driver\s*\()\s*struct\s+device_driver\s*\*",
+		r"\1const struct device_driver *", text)
+	if text2 != text:
+		note(path, "const to_*_driver")
+		text = text2
 	# alarm callbacks return void (6.18: enum alarmtimer_restart is gone). Every OnePlus/Qualcomm one
 	# returns ALARMTIMER_NORESTART -- none re-arms through its return value
 	if "enum alarmtimer_restart" in text and "ALARMTIMER_RESTART;" not in text:
