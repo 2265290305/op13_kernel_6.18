@@ -515,6 +515,28 @@ def fix(path):
 	if text2 != text:
 		note(path, "sched_param")
 		text = text2
+	# blkdev_get_by_dev()/blkdev_put() are gone (6.9+): bdev_file_open_by_dev() hands back a file,
+	# put when done -- as the kernel's own zram does. The files opened, by their bdev (hybridswap)
+	if re.search(r"\bblkdev_get_by_dev\s*\(", text) and "k618_blkdev_get_by_dev" not in text:
+		text = re.sub(r"\bblkdev_get_by_dev\s*\(", "k618_blkdev_get_by_dev(", text)
+		text = re.sub(r"\bblkdev_put\s*\(", "k618_blkdev_put(", text)
+		marker = "k618_blkdev_put(" if text.find("k618_blkdev_put(") != -1 and \
+			text.find("k618_blkdev_put(") < text.find("k618_blkdev_get_by_dev(") else "k618_blkdev_get_by_dev("
+		text = insert_top_level(text, marker,
+			"/* 6.9+: block devices are opened as files (vendor_fix618.py) */\n"
+			"static struct file *k618_bdev_files[8];\n"
+			"static struct block_device *k618_blkdev_get_by_dev(dev_t dev, unsigned int mode, void *holder,\n"
+			"\t\tconst struct blk_holder_ops *hops)\n{\n"
+			"\tstruct file *f = bdev_file_open_by_dev(dev, (__force blk_mode_t)mode, holder, hops);\n"
+			"\tint i;\n\n\tif (IS_ERR(f))\n\t\treturn ERR_CAST(f);\n"
+			"\tfor (i = 0; i < ARRAY_SIZE(k618_bdev_files); i++)\n"
+			"\t\tif (!k618_bdev_files[i]) {\n\t\t\tk618_bdev_files[i] = f;\n\t\t\treturn file_bdev(f);\n\t\t}\n"
+			"\tfput(f);\n\treturn ERR_PTR(-EMFILE);\n}\n\n"
+			"static void k618_blkdev_put(struct block_device *bdev, void *holder)\n{\n\tint i;\n\n"
+			"\tfor (i = 0; i < ARRAY_SIZE(k618_bdev_files); i++)\n"
+			"\t\tif (k618_bdev_files[i] && file_bdev(k618_bdev_files[i]) == bdev) {\n"
+			"\t\t\tfput(k618_bdev_files[i]);\n\t\t\tk618_bdev_files[i] = NULL;\n\t\t\treturn;\n\t\t}\n}\n")
+		note(path, "blkdev_get_by_dev")
 	# alarm callbacks return void (6.18: enum alarmtimer_restart is gone). Every OnePlus/Qualcomm one
 	# returns ALARMTIMER_NORESTART -- none re-arms through its return value
 	if "enum alarmtimer_restart" in text and "ALARMTIMER_RESTART;" not in text:
