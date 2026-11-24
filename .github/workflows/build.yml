@@ -28,6 +28,12 @@ jobs:
           sudo docker image prune -af > /dev/null || true
           df -h /
 
+      - name: Restore host tools (pahole, bindgen)
+        uses: actions/cache@v4
+        with:
+          path: ~/host-tools
+          key: host-tools-pahole1.30-bindgen0.72.1-noble
+
       - name: Host packages
         run: |
           # LLVM 22 from apt.llvm.org: the major Android builds android17-6.18 with (its pinned
@@ -42,13 +48,18 @@ jobs:
           # pahole (the kernel's BTF): Ubuntu 24.04's 1.25 stops at 4096 per-CPU variables and writes
           # BTF 6.18's resolve_btfids refuses ("load BTF from vmlinux.unstripped: Invalid argument",
           # run 45375007648); 1.30 from its release tag
-          git clone -q --depth 1 --branch v1.30 --recurse-submodules --shallow-submodules \
-            https://github.com/acmel/dwarves /tmp/dwarves
-          cmake -S /tmp/dwarves -B /tmp/dwarves/build -DCMAKE_BUILD_TYPE=Release -D__LIB=lib \
-            -DCMAKE_INSTALL_PREFIX=/usr/local > /dev/null
-          make -C /tmp/dwarves/build -j"$(nproc)" > /dev/null
-          sudo make -C /tmp/dwarves/build install > /dev/null
-          sudo ldconfig
+          # (pahole and bindgen are kept in ~/host-tools between runs: built once, not every time)
+          T=$HOME/host-tools
+          if [ ! -x "$T/bin/pahole" ]; then
+            git clone -q --depth 1 --branch v1.30 --recurse-submodules --shallow-submodules \
+              https://github.com/acmel/dwarves /tmp/dwarves
+            cmake -S /tmp/dwarves -B /tmp/dwarves/build -DCMAKE_BUILD_TYPE=Release -D__LIB=lib \
+              -DBUILD_SHARED_LIBS=OFF -DCMAKE_INSTALL_PREFIX="$T" > /dev/null
+            make -C /tmp/dwarves/build -j"$(nproc)" > /dev/null
+            make -C /tmp/dwarves/build install > /dev/null
+          fi
+          echo "$T/bin" >> "$GITHUB_PATH"
+          export PATH=$T/bin:$PATH
           pahole --version
           # Rust (CONFIG_RUST, as gki_defconfig: Android's ashmem is a Rust driver in 6.18, and the
           # Rust binder module): rustc 1.91.1 as build.config.constants pins (RUSTC_VERSION), with
@@ -57,7 +68,7 @@ jobs:
           rustup default 1.91.1
           # bindgen 0.71+ (6.18's rust/bindgen_parameters uses --with-attribute-custom-enum; Ubuntu's
           # 0.66.1 refused it, run 45406978150)
-          cargo install -q bindgen-cli --version 0.72.1 --locked
+          [ -x "$T/bin/bindgen" ] || cargo install -q bindgen-cli --version 0.72.1 --locked --root "$T"
           echo "LIBCLANG_PATH=/usr/lib/llvm-22/lib" >> "$GITHUB_ENV"
           rustc --version; bindgen --version
 
