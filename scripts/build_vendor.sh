@@ -357,6 +357,10 @@ fi
 still_wanted "$W/wanted-late.txt" > /dev/null
 if [ -s "$ROOT/out/soc-dropped.txt" ] && [ -f "$S/Kbuild" ]; then
 	cp "$S/Kbuild" "$W/soc-Kbuild.saved"
+	# the SoC tree is built in place: 6.18 refuses a separate-output build (MO=) of a tree with a
+	# modules.order ("The external module source tree is not clean": run 45427714881 built none of
+	# these), so it is set aside meanwhile
+	[ -f "$S/modules.order" ] && mv "$S/modules.order" "$W/soc-modules.order.saved"
 	LSYMS="$O/Module.symvers $S/Module.symvers $(find "$W" -name Module.symvers 2>/dev/null | tr '\n' ' ') \
 $(find "$ROOT/out/oplus" "$ROOT/out/extra" -name Module.symvers 2>/dev/null | tr '\n' ' ') \
 $(ls "$ROOT"/out/tp-log/*.symvers 2>/dev/null | tr '\n' ' ')"
@@ -380,6 +384,7 @@ $(ls "$ROOT"/out/tp-log/*.symvers 2>/dev/null | tr '\n' ' ')"
 		fi
 	done < "$ROOT/out/soc-dropped.txt"
 	cp "$W/soc-Kbuild.saved" "$S/Kbuild"
+	[ -f "$W/soc-modules.order.saved" ] && mv "$W/soc-modules.order.saved" "$S/modules.order"
 fi
 
 n=$(still_wanted "$LOG/failed.txt")
