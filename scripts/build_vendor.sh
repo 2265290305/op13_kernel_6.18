@@ -64,6 +64,9 @@ prepare() {
 	# the definitions, read before the copy's fixes; OnePlus' macro file from that tree's kernel_platform
 	BZL_KVER=$KV BZL_MACROS=$SRC/kernel_platform/oplus/bazel python3 -I "$ROOT/scripts/bzl_eval.py" "$T" "$P/modules.json" \
 		vendor/oplus $(for r in $QREPOS; do echo "vendor/qcom/opensource/$r"; done)
+	# this port's fixes first as well: some patterns the reference's sweep would take wrongly
+	# (an hrtimer callback from a table)
+	python3 -I "$ROOT/scripts/vendor_fix618.py" "$T/vendor" > /dev/null
 	for d in "$T"/vendor/* "$T"/msm8750; do
 		[ -d "$d" ] || continue
 		python3 -I "$REF/k618_fix618.py" "$d" | grep -v 'k618_fix618: 0 files changed' || true
@@ -114,6 +117,9 @@ prepare() {
 	lnk st_uapi.h "$T/vendor/st/opensource/driver/include/uapi/linux/nfc/st_uapi.h"
 	# the UFS trace events moved into the UFS core (6.x): by their old path
 	lnk trace/events/ufs.h "$C/drivers/ufs/core/ufs_trace.h"
+	lnk ufs_trace.h "$C/drivers/ufs/core/ufs_trace.h"
+	lnk ufs_trace_types.h "$C/drivers/ufs/core/ufs_trace_types.h"
+	lnk pinctrl-msm.h "$S/drivers/pinctrl/qcom/pinctrl-msm.h"
 	lnk trace/events/ufs_trace_types.h "$C/drivers/ufs/core/ufs_trace_types.h"
 	# OnePlus' cpu tree as its kernel has it (kernel/oplus_cpu): includes of "../kernel/oplus_cpu/..."
 	# resolve from the include directory above

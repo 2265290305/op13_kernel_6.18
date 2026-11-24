@@ -18,6 +18,7 @@ to it alone; its defconfig's options are defined for it (CONFIG_X=1, CONFIG_X_MO
 """
 import json
 import os
+import re
 import sys
 
 MODS, TREE, WANT, HAVE, PLAN = sys.argv[1:6]
@@ -131,6 +132,11 @@ for m in order:
 			objs.append(s[:-2] + ".o")
 	flags = ["-I$(src)"] + ["-I" + i for i in exported_includes(m)]
 	for dfn in m["local_defines"]:
+		# trace headers' directories handed in as defines, relative to the kernel's include/trace in
+		# Qualcomm's layout (GSI_TRACE_INCLUDE_PATH=../../../../vendor/qcom/...): absolute, in TREE
+		tm = re.match(r"(\w*TRACE_INCLUDE_PATH)=(.*)$", dfn)
+		if tm and "vendor/" in tm.group(2):
+			dfn = "%s=%s" % (tm.group(1), os.path.join(TREE, tm.group(2)[tm.group(2).index("vendor/"):]))
 		flags.append("-D" + dfn)
 	for opt, val in m["defconfig_options"]:
 		if val == "y":

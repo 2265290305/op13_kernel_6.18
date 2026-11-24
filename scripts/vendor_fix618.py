@@ -111,6 +111,9 @@ RULES = [
 	("strlcpy", re.compile(r"\bstrlcpy\s*\("), "strscpy("),
 	("pwm_apply_state", re.compile(r"\bpwm_apply_state\s*\("), "pwm_apply_might_sleep("),
 	("ANDROID_KABI", re.compile(r"\bandroid_kabi_reserved(\d+)\b"), r"__kabi_reserved\1"),
+	# the legacy GPIO direction flags (6.x): GPIOF_IN, GPIOF_OUT_INIT_LOW
+	("GPIOF", re.compile(r"\bGPIOF_DIR_IN\b"), "GPIOF_IN"),
+	("GPIOF", re.compile(r"\bGPIOF_DIR_OUT\b"), "GPIOF_OUT_INIT_LOW"),
 	("no_llseek", re.compile(r"(\.llseek\s*=\s*)no_llseek\b"), r"\1NULL"),
 	# the inode times are behind accessors (6.7): a helper updating one in place gets a copy written back
 	("inode times", re.compile(r"\b(\w+)\(\s*&\s*(file_inode\(\s*\w+\s*\)|\w+)->i_(m|a)time\s*\)\s*;"),
@@ -308,6 +311,27 @@ DEVM_GPIO = (
 SCHED_H_FUNCS = ("css_tg", "uclamp_bucket_id")
 
 
+def fix_hrtimer_expr(path, text):
+	"""hrtimer_init(T, C, M); T.function = <any expression>; -> hrtimer_setup(T, <expr>, C, M); (the
+	reference's k618_fix618 takes only a plain name there, and falls back to the file's only hrtimer
+	callback otherwise: the touch panel's per-finger timers from a function table got a wrong one)"""
+	out, pos = [], 0
+	for m in re.finditer(r"\bhrtimer_init\(\s*([^,;]+?)\s*,\s*([^,;]+?)\s*,\s*([^,;)]+?)\s*\);", text):
+		if m.start() < pos:
+			continue
+		t = m.group(1)
+		lhs = re.escape(t[1:].strip()) + r"\s*\." if t.startswith("&") else re.escape(t) + r"\s*->"
+		a = re.compile(r"\s*" + lhs + r"function\s*=\s*([^;]+?)\s*;").match(text, m.end())
+		if not a or re.fullmatch(r"\w+", a.group(1)):
+			continue		# none right after, or a plain name: k618_fix618's
+		out.append(text[pos:m.start()] + "hrtimer_setup(%s, %s, %s, %s);" % (t, a.group(1), m.group(2), m.group(3)))
+		pos = a.end()
+	if not out:
+		return text
+	note(path, "hrtimer_setup")
+	return "".join(out) + text[pos:]
+
+
 def fix(path):
 	try:
 		text = open(path, encoding="utf-8", errors="surrogateescape").read()
@@ -347,11 +371,13 @@ def fix(path):
 				note(path, "sched.h " + fn)
 				text = text2
 	text = fix_assign_str(path, text)
-	# OnePlus' oplus_project.h uses int32_t and friends with no header for them (6.6 had it through
-	# whatever came before)
-	if path.endswith("boot/include/oplus_project.h") and "#include <linux/types.h>" not in text:
-		text = text.replace("#define _OPLUS_PROJECT_H_\n", "#define _OPLUS_PROJECT_H_\n#include <linux/types.h>\n", 1)
-		note(path, "include linux/types.h")
+	text = fix_hrtimer_expr(path, text)
+	# OnePlus' boot headers (oplus_project.h, oplus_midplat.h ...) use u32/int32_t with no header for them
+	if "/boot/include/" in path and path.endswith(".h") and "#include <linux/types.h>" not in text:
+		m = re.search(r"^#define\s+\w+_H_*\s*$", text, re.M)
+		if m:
+			text = text[:m.end()] + "\n#include <linux/types.h>" + text[m.end():]
+			note(path, "include linux/types.h")
 	# OnePlus' project info (get_eng_version, FACTORY, AGING ...) used where its header is included only
 	# under some option (Wi-Fi's cnss2/debug.h: inside IPC_LOGGING): included unconditionally too
 	if re.search(r"\bget_eng_version\s*\(", text) and "soc/oplus/system/oplus_project.h" in text \
@@ -397,6 +423,8 @@ def fix(path):
 		for used, header in ((r"\bv(?:malloc|zalloc|free)\s*\(", "linux/vmalloc.h"),
 				(r"\bstruct\s+platform_device_id\b", "linux/mod_devicetable.h"),
 				(r"\bstruct\s+platform_(?:device|driver)\b", "linux/platform_device.h"),
+				(r"\balarmtimer_restart\b|\bstruct\s+alarm\b", "linux/alarmtimer.h"),
+				(r"\bwakeup_source_(?:add|remove|create|register)\s*\(", "linux/pm_wakeup.h"),
 				(r"\bdevm_gpio_request(?:_one)?\s*\(", "linux/gpio.h")):
 			text, did = include_if(text, used, header)
 			if did:
