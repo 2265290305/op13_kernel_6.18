@@ -658,7 +658,7 @@ def fix(path):
 			note(path, "device_find_child match")
 			text = text2
 	# page->index is gone (6.16, the folio's): hybridswap stores a sector in its bio pages' index
-	text2 = re.sub(r"(\bdest_pages\[\s*\w+\s*\])->index\b", r"page_folio(\1)->index", text)
+	text2 = re.sub(r"((?:\b\w+\s*(?:->|\.)\s*)*\bdest_pages\[\s*\w+\s*\])->index\b", r"page_folio(\1)->index", text)
 	if text2 != text:
 		note(path, "page index")
 		text = text2
