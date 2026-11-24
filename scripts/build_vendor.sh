@@ -387,6 +387,41 @@ $(ls "$ROOT"/out/tp-log/*.symvers 2>/dev/null | tr '\n' ' ')"
 	[ -f "$W/soc-modules.order.saved" ] && mv "$W/soc-modules.order.saved" "$S/modules.order"
 fi
 
+# OnePlus/Qualcomm modules that failed only for symbols a late SoC module exports (swr_haptics:
+# qcom-hv-haptics' register_hboost_event_notifier), built once more now that those are there
+LATE=$(find "$ROOT/out/soc-late" -name Module.symvers 2>/dev/null | tr '\n' ' ')
+if [ -n "$LATE" ]; then
+	SYMS="$SYMS $LATE"
+	for P in "$P1" ${P2:+"$P2"}; do
+		[ -f "$P/failed" ] || continue
+		while read -r name; do
+			L=$LOG/$(basename "$P")-$name.log
+			[ -f "$L" ] && grep -q '^ERROR: modpost: .* undefined!' "$L" || continue
+			grep -qE ': (fatal )?error: ' "$L" && continue
+			still=0
+			for sym in $(sed -n -E 's/^ERROR: modpost: "([^"]+)" .* undefined!/\1/p' "$L"); do
+				cat $LATE | awk -v s="$sym" '$2 == s { f = 1 } END { exit !f }' || still=1
+			done
+			[ "$still" -eq 0 ] || continue
+			pkg=; base=
+			IFS='|' read -r _l _n pkg base _needs < <(awk -F'|' -v n="$name" '$2 == n' "$P/levels.txt") || true
+			[ -n "$pkg" ] || continue
+			MO=$P/obj/$name
+			set +e
+			"${KMAKE[@]}" -k M="$P/tree/$pkg" MO="$MO" OPMOD="$base" modules -j"$J" KBUILD_EXTRA_SYMBOLS="$SYMS" \
+				NOSTDINC_FLAGS="-nostdinc -I$P/inc -I$S/include -I$S/include/uapi -idirafter $W/inc8750 -idirafter $C -idirafter $S" \
+				KCFLAGS="-Wno-error -include $CONF" > "$L.late" 2>&1
+			set -e
+			if [ -f "$MO/$base.ko" ]; then
+				echo "build_vendor: $name: built ($(basename "$P"), after the late SoC modules)" | tee -a "$LOG/summary.txt"
+				cp "$MO/$base.ko" "$OUTM/"; ok=$((ok + 1))
+			else
+				echo "build_vendor: $name: FAILED again after the late SoC modules ($L.late)" | tee -a "$LOG/summary.txt"
+			fi
+		done < "$P/failed"
+	done
+fi
+
 n=$(still_wanted "$LOG/failed.txt")
 ls "$OUTM" | sed 's/\.ko$//' > "$ROOT/out/vendormods.list"
 echo "build_vendor: built $ok; not built: $n (failed.txt)" | tee -a "$LOG/summary.txt"
