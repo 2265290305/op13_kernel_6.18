@@ -210,6 +210,13 @@ PY
 		mkdir -p "$MO"
 		vars=; defs=
 		for o in $opts; do vars="$vars $o=m"; defs="$defs -D${o}_MODULE=1"; done
+		# the roots the directory's Android Makefile hands its Kbuild (KBUILD_OPTIONS += X_ROOT=
+		# $(KERNEL_SRC)/$(M)[/..]): NFC's Kbuild includes $(NFC_ROOT)/config/gki_nfc.conf
+		if [ -f "$T/$dir/Makefile" ]; then
+			for o in $(sed -n -E 's#^[[:space:]]*KBUILD_OPTIONS[[:space:]]*\+?=[[:space:]]*([A-Za-z0-9_]+)=\$\(KERNEL_SRC\)/\$\(M\)(/[^[:space:]]*)?[[:space:]]*$#\1=\2#p' "$T/$dir/Makefile"); do
+				vars="$vars ${o%%=*}=$T/$dir${o#*=}"
+			done
+		fi
 		# the symbol versions of everything built so far, less those of the modules this make makes
 		# itself (its Makefile may make again one built already: modpost refuses an export twice) --
 		# only those: obj-m and obj-$(CONFIG_X) with X one of ours or on in the kernel's configuration.
