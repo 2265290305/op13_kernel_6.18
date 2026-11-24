@@ -499,36 +499,6 @@ PY
 	echo "op13_hold_reboot= added"
 fi
 
-# SELinux denials ("avc:  denied", from the kernel's audit printk before logd runs and from logd's
-# audit lines after) at error level, so they reach the pstore log: Android lowers the console level
-# after boot and test-45 kept none of them. What enforcing (vendor_boot's androidboot.selinux) would
-# refuse shows up in a permissive boot's log this way.
-AU=$C/kernel/audit.c
-if ! grep -q 'op13: denials in pstore' $AU; then
-	python3 -I - "$AU" "$C/kernel/printk/printk.c" <<'PY'
-import sys
-au, pk = sys.argv[1:3]
-t = open(au).read()
-old = '\tif (nlh->nlmsg_type != AUDIT_EOE && printk_ratelimit())\n\t\tpr_notice("type=%d %s\\n", nlh->nlmsg_type, data);\n'
-assert t.count(old) == 1, "kauditd printk"
-t = t.replace(old, '\tif (nlh->nlmsg_type != AUDIT_EOE && printk_ratelimit()) {\n'
-	'\t\tif (nlh->nlmsg_type == AUDIT_AVC)\t/* op13: denials in pstore */\n'
-	'\t\t\tpr_err("type=%d %s\\n", nlh->nlmsg_type, data);\n'
-	'\t\telse\n\t\t\tpr_notice("type=%d %s\\n", nlh->nlmsg_type, data);\n\t}\n', 1)
-open(au, "w").write(t)
-
-t = open(pk).read()
-old = '\tdevkmsg_emit(facility, level, "%s", line);\n\tkfree(buf);\n'
-assert t.count(old) == 1, "devkmsg_write"
-t = t.replace(old, '\t/* op13: SELinux denials logd passes on, at error level for pstore */\n'
-	'\tif (level > LOGLEVEL_ERR && strstr(line, "avc:  denied"))\n\t\tlevel = LOGLEVEL_ERR;\n' + old, 1)
-open(pk, "w").write(t)
-PY
-	grep -q 'op13: denials in pstore' $AU && grep -q 'op13: SELinux denials logd' $C/kernel/printk/printk.c \
-		|| { echo "selinux denials: edit failed"; exit 1; }
-	echo "SELinux denials at error level"
-fi
-
 # android_rvh_commit_creds, as android15-6.6 has it (include/trace/hooks/creds.h; 6.18's ACK dropped
 # it): OnePlus' schedinfo (oplus_bsp_schedinfo, osi_amu.c) follows a task's uid through it
 CH=$C/include/trace/hooks/creds.h
