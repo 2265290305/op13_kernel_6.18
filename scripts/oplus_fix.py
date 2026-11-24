@@ -113,6 +113,11 @@ EDITS = [
     ("futex.c",
      "static void android_vh_do_futex_handler(void *unused, int cmd,",
      "static void android_vh_do_futex_handler(void *unused, u32 __user *uaddr, int cmd,"),
+    # binder_watcher: the kernel's binder_alloc.h has its own binder_alloc_buffer_size() now, and
+    # the mapping's start is alloc->vm_start (6.12): the module's copy under its own name
+    ("binder_watcher.c", "binder_alloc_buffer_size(", "oplus_binder_alloc_buffer_size("),
+    ("binder_watcher.c", "return alloc->buffer + alloc->buffer_size - buffer->user_data;",
+     "return alloc->vm_start + alloc->buffer_size - buffer->user_data;"),
     ("oplus_uprobe.c",
      "static struct kprobe uprobe_unregister_kp = {\n\t.symbol_name = \"uprobe_unregister\"\n};",
      "static struct kprobe uprobe_unregister_kp = {\n\t.symbol_name = \"uprobe_unregister_nosync\"\n};"),
