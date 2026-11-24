@@ -419,6 +419,13 @@ def fix(path):
 		text, did = include_if(text, r".", "linux/device.h")
 		if did:
 			note(path, "include linux/device.h")
+	# GPIO_DYNAMIC_BASE left the public headers (6.x; still 512 in gpiolib.h) and GPIOF_INIT_LOW/HIGH
+	# are gone (6.18): their old values, where a file still uses them (OnePlus' camera actuator)
+	for name, val in (("GPIO_DYNAMIC_BASE", "512"), ("GPIOF_INIT_LOW", "(0 << 1)"), ("GPIOF_INIT_HIGH", "(1 << 1)")):
+		if re.search(r"\b%s\b" % name, text) and not re.search(r"#\s*define\s+%s\b" % name, text):
+			text = insert_top_level(text, name, "#ifndef %s\n#define %s %s\t/* gone in 6.18 (vendor_fix618.py) */\n#endif\n"
+				% (name, name, val))
+			note(path, name)
 	# alarm callbacks return void (6.18: enum alarmtimer_restart is gone). Every OnePlus/Qualcomm one
 	# returns ALARMTIMER_NORESTART -- none re-arms through its return value
 	if "enum alarmtimer_restart" in text and "ALARMTIMER_RESTART;" not in text:
