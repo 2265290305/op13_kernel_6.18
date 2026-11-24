@@ -40,6 +40,17 @@ EDITS = [
      "#include \"drivers/mmc/host/sdhci-cqhci.h\"\n#include \"drivers/mmc/host/sdhci-pltfm.h\"\n#include \"cqhci.h\"\n",
      "#include \"cqhci.h\"\t/* op13: the SoC's, ahead of the kernel's (scripts/soc_fix.py) */\n"
      "#include \"drivers/mmc/host/sdhci-cqhci.h\"\n#include \"drivers/mmc/host/sdhci-pltfm.h\"\n"),
+    # the reference's Xiaomi UFS sysfs nodes (ufs-qcom-mi.c: ufs_monitor, ufscld, which Xiaomi's ROM
+    # reads) do not belong on the OnePlus 13: out of the probe and remove of its storage driver
+    ("drivers/ufs/host/ufs-qcom.c",
+     "/* k618: the Xiaomi sysfs nodes (ufs_monitor, ufscld) the ROM reads; see that file */\n#include \"ufs-qcom-mi.c\"\n",
+     "/* op13: no Xiaomi UFS nodes (scripts/soc_fix.py) */\n"),
+    ("drivers/ufs/host/ufs-qcom.c",
+     "\t/* k618: ufs_monitor now, ufscld once the async scan has found the device */\n"
+     "\tk618_ufs_mi_probe(platform_get_drvdata(pdev));\n",
+     "\t/* op13: no Xiaomi UFS nodes (scripts/soc_fix.py) */\n"),
+    ("drivers/ufs/host/ufs-qcom.c", "\n\tk618_ufs_mi_remove(hba);\n\tufshcd_remove(hba);",
+     "\n\tufshcd_remove(hba);\t/* op13: no Xiaomi UFS nodes */"),
     # 6.18's blk-crypto calls the standard key type RAW
     ("drivers/mmc/host/cqhci-crypto.c", "profile->key_types_supported = BLK_CRYPTO_KEY_TYPE_STANDARD;",
      "profile->key_types_supported = BLK_CRYPTO_KEY_TYPE_RAW;"),
