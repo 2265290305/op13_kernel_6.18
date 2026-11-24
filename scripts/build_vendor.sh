@@ -35,6 +35,12 @@ LOG=$ROOT/out/vendor-log
 ST=$ROOT/device/op13/stock
 [ -f "$S/Module.symvers" ] || { echo "build_vendor: build the SoC modules first"; exit 1; }
 rm -rf "$W" "$OUTM" "$LOG" && mkdir -p "$W" "$OUTM" "$LOG"
+# one make jobserver for the module builds that run side by side (fd 9, $J tokens): a module builds
+# with as many CPUs as are free -- with -j1 each, the big ones (Wi-Fi) compiled one file at a time
+# after the rest were done (~11 min of run 45427714881)
+mkfifo "$W/jobserver" && exec 9<>"$W/jobserver" && rm -f "$W/jobserver"
+printf '%*s' "$J" '' | tr ' ' '+' >&9
+JOBSERVER="-j --jobserver-auth=9,9"
 CONF=$W/soc-autoconf.h
 soc_autoconf "$CONF"
 : > "$LOG/summary.txt"
@@ -76,10 +82,12 @@ prepare() {
 	# this port's fixes first as well: some patterns the reference's sweep would take wrongly
 	# (an hrtimer callback from a table)
 	python3 -I "$ROOT/scripts/vendor_fix618.py" "$T/vendor" > /dev/null
+	# the reference's sweep over the whole copy, its files on every CPU (scripts/par_fix618.py: the
+	# same per-file fixes; one after another it took ~4 min a pass)
+	python3 -I "$ROOT/scripts/par_fix618.py" "$REF" "$J" "$T"/vendor/* "$T"/msm8750 2>&1 \
+		| grep -v 'k618_fix618: 0 files changed' || true
 	for d in "$T"/vendor/* "$T"/msm8750; do
-		[ -d "$d" ] || continue
-		python3 -I "$REF/k618_fix618.py" "$d" | grep -v 'k618_fix618: 0 files changed' || true
-		python3 -I "$ROOT/scripts/oplus_fix.py" "$d"
+		[ -d "$d" ] && python3 -I "$ROOT/scripts/oplus_fix.py" "$d"
 	done
 	# the reference's 6.12 -> 6.18 techpack fixes (not its Xiaomi or 5.15 ones), as build_tp.sh, and
 	# the API changes these sources meet (scripts/vendor_fix618.py)
@@ -175,7 +183,7 @@ PY
 			(
 				MO=$P/obj/$name
 				mkdir -p "$MO"
-				"${KMAKE[@]}" -k M="$T/$pkg" MO="$MO" OPMOD="$base" modules -j1 KBUILD_EXTRA_SYMBOLS="$SYMS" \
+				MAKEFLAGS="$JOBSERVER" "${KMAKE[@]}" -k M="$T/$pkg" MO="$MO" OPMOD="$base" modules KBUILD_EXTRA_SYMBOLS="$SYMS" \
 					NOSTDINC_FLAGS="-nostdinc -I$P/inc -I$S/include -I$S/include/uapi -idirafter $W/inc8750 -idirafter $C -idirafter $S" \
 					KCFLAGS="-Wno-error -include $CONF" > "$LOG/$(basename "$P")-$name.log" 2>&1
 				echo "$? $MO/$base.ko" > "$MO/.result"
