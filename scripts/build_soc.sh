@@ -24,6 +24,18 @@ python3 -I "$REF/k618_soc_kbuild.py" copies "$S" "$C"
 grep -v 'drivers/power/oplus/Kconfig' "$S/Kconfig.msm" > "$S/gen/Kconfig.msm"
 KCONFIG_EXT_PREFIX=$S/ "$S/flatten_kconfig.sh" "$S/gen/Kconfig.msm" > "$S/gen/Kconfig.ext"
 python3 -I "$REF/k618_soc_kbuild.py" fragment "$S" "$S/$CFG" > "$S/gen/fragment.config"
+# the reference's fragment turns every OPLUS option off (OnePlus code it did not have); the OnePlus
+# options this port's overrides set on are code the SoC tree has (qcom_stats, smp2p, clk-debug,
+# debug-regulator: oplus_rpmh_statics and oplus_standby_netlink link against them): set again
+# after it, the later line wins
+python3 -I - "$ROOT/configs/op13_overrides.bzl" >> "$S/gen/fragment.config" <<'PY'
+import sys
+env = {}
+exec(open(sys.argv[1]).read(), env)
+for k, v in sorted(env["op13_overrides_config"].items()):
+	if "OPLUS" in k and v != "n":
+		print(f"{k}={v}")
+PY
 # every module the phone loads, also those sun_perf leaves off: their options to m on top (Kconfig
 # keeps an option off whose dependencies are not met). Those that were off are new to the boot:
 # out/soc-forced.txt lists them for build_bootimg.sh (boot.img leaves them unloaded)
