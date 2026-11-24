@@ -662,6 +662,14 @@ def fix(path):
 	if text2 != text:
 		note(path, "page index")
 		text = text2
+	# android_rvh_after_dequeue_task passes dequeue_task()'s result too (6.18 ACK): its handlers
+	# (OnePlus' sched_tune) take it, unused
+	for name in set(re.findall(r"\bregister_trace_android_rvh_after_dequeue_task\(\s*(\w+)", text)):
+		text2 = re.sub(r"(\b%s\s*\(\s*void\s*\*\s*\w+\s*,\s*struct\s+rq\s*\*\s*\w+\s*,\s*struct\s+task_struct"
+			r"\s*\*\s*\w+\s*,\s*int\s+\w+)\s*\)" % re.escape(name), r"\1, bool *k618_dequeue_result)", text)
+		if text2 != text:
+			note(path, "after_dequeue_task")
+			text = text2
 	# page_mapcount() is gone (6.15): a page's folio's mapcount
 	text2 = re.sub(r"\bpage_mapcount\(\s*(\w+)\s*\)", r"folio_mapcount(page_folio(\1))", text)
 	if text2 != text:
