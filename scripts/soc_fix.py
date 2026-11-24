@@ -40,6 +40,11 @@ EDITS = [
      "#include \"drivers/mmc/host/sdhci-cqhci.h\"\n#include \"drivers/mmc/host/sdhci-pltfm.h\"\n#include \"cqhci.h\"\n",
      "#include \"cqhci.h\"\t/* op13: the SoC's, ahead of the kernel's (scripts/soc_fix.py) */\n"
      "#include \"drivers/mmc/host/sdhci-cqhci.h\"\n#include \"drivers/mmc/host/sdhci-pltfm.h\"\n"),
+    # sdhci-msm: the host is device-managed since 6.16 (devm_mmc_alloc_host); sdhci_pltfm_free() is
+    # gone and nothing is left to free (SoC build: "call to undeclared function 'sdhci_pltfm_free'")
+    ("drivers/mmc/host/sdhci-msm.c",
+     "\tsdhci_pltfm_free(pdev);\n",
+     "\t/* op13: devm host (6.16+), nothing to free (scripts/soc_fix.py) */\n"),
     # the reference's Xiaomi UFS sysfs nodes (ufs-qcom-mi.c: ufs_monitor, ufscld, which Xiaomi's ROM
     # reads) do not belong on the OnePlus 13: out of the probe and remove of its storage driver
     ("drivers/ufs/host/ufs-qcom.c",
