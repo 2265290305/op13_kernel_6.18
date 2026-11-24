@@ -138,7 +138,19 @@ for m in order:
 		if tm and "vendor/" in tm.group(2):
 			dfn = "%s=%s" % (tm.group(1), os.path.join(TREE, tm.group(2)[tm.group(2).index("vendor/"):]))
 		flags.append("-D" + dfn)
-	for opt, val in m["defconfig_options"]:
+	# a ddk_module sees the configuration of the modules it depends on, as Kleaf passes it down
+	# (Wi-Fi gets dataipa's CONFIG_IPA3 through its dep on ipam; without it qcacld took IPA's stubs)
+	opts, seen, todo = {}, set(), [x for x in m["deps"] if x in by_label]
+	while todo:
+		d = todo.pop()
+		if d in seen:
+			continue
+		seen.add(d)
+		for opt, val in by_label[d]["defconfig_options"]:
+			opts.setdefault(opt, val)
+		todo += [x for x in by_label[d]["deps"] if x in by_label]
+	opts.update(dict(m["defconfig_options"]))
+	for opt, val in opts.items():
 		if val == "y":
 			flags.append("-D%s=1" % opt)
 		elif val == "m":

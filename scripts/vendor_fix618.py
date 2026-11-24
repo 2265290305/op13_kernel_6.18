@@ -152,7 +152,7 @@ DAIFMT = {"S": "C", "M": "P"}
 def insert_top_level(text, marker, code):
 	"""code placed after the last #include ahead of marker's first use that no #if encloses."""
 	first = text.index(marker)
-	at, depth = 0, 0
+	at, any_at, depth = 0, 0, 0
 	for x in re.finditer(r"^[ \t]*#[ \t]*(if|ifdef|ifndef|endif|include)\b.*$", text, re.M):
 		if x.start() >= first:
 			break
@@ -160,8 +160,12 @@ def insert_top_level(text, marker, code):
 			depth += 1
 		elif x.group(1) == "endif":
 			depth = max(depth - 1, 0)
-		elif depth == 0:
-			at = x.end()
+		else:
+			any_at = x.end()
+			if depth == 0:
+				at = x.end()
+	# a header's includes are all inside its guard: after the last one before the use, then
+	at = at or any_at
 	return text[:at] + "\n" + code + text[at:]
 
 
@@ -487,6 +491,30 @@ def fix(path):
 				"\tif (!tz || id < 0 || id >= tz->num_trips || !trip)\n\t\treturn -EINVAL;\n"
 				"\t*trip = tz->trips[id].trip;\n\treturn 0;\n}\n")
 		note(path, "thermal trip descriptors")
+	# init_dummy_netdev() is static since 6.13 (alloc_netdev_dummy() allocates one): IPA and Wi-Fi
+	# embed theirs (NAPI only). What alloc_netdev() + the dummy init set up, on the embedded one
+	if re.search(r"\binit_dummy_netdev\s*\(", text) and "k618_init_dummy_netdev" not in text \
+			and not re.search(r"^\w[^;]*\binit_dummy_netdev\s*\([^;]*\)\s*\{", text, re.M):
+		text = re.sub(r"\binit_dummy_netdev\s*\(", "k618_init_dummy_netdev(", text)
+		text = insert_top_level(text, "k618_init_dummy_netdev(",
+			"/* 6.13+: init_dummy_netdev() is not exported; a NAPI-only dummy (vendor_fix618.py) */\n"
+			"#ifndef K618_INIT_DUMMY_NETDEV\n#define K618_INIT_DUMMY_NETDEV\n"
+			"static inline int k618_init_dummy_netdev(struct net_device *dev)\n{\n"
+			"\tmemset(dev, 0, sizeof(*dev));\n"
+			"\tINIT_LIST_HEAD(&dev->napi_list);\n\tINIT_LIST_HEAD(&dev->unreg_list);\n"
+			"\tINIT_LIST_HEAD(&dev->close_list);\n\tINIT_LIST_HEAD(&dev->link_watch_list);\n"
+			"\tINIT_LIST_HEAD(&dev->ptype_all);\n\tINIT_LIST_HEAD(&dev->ptype_specific);\n"
+			"\tmutex_init(&dev->lock);\n\tdev_net_set(dev, &init_net);\n"
+			"\tdev->reg_state = NETREG_DUMMY;\n"
+			"\tset_bit(__LINK_STATE_PRESENT, &dev->state);\n\tset_bit(__LINK_STATE_START, &dev->state);\n"
+			"\treturn 0;\n}\n#endif\n")
+		note(path, "init_dummy_netdev")
+	# struct sched_param is in linux/sched.h (6.x): a file's own copy goes (camera's request manager)
+	text2 = re.sub(r"^struct\s+sched_param\s*\{[^}]*\};[ \t]*\n", "/* 6.x: struct sched_param is linux/sched.h's (vendor_fix618.py) */\n",
+		text, flags=re.M)
+	if text2 != text:
+		note(path, "sched_param")
+		text = text2
 	# alarm callbacks return void (6.18: enum alarmtimer_restart is gone). Every OnePlus/Qualcomm one
 	# returns ALARMTIMER_NORESTART -- none re-arms through its return value
 	if "enum alarmtimer_restart" in text and "ALARMTIMER_RESTART;" not in text:
@@ -590,7 +618,7 @@ def fix(path):
 			if did:
 				note(path, "thermal_core.h")
 		# v4l2_ioctl_ops lost vidioc_g_ctrl/vidioc_s_ctrl (6.x: the control framework handles them)
-		text2 = re.sub(r"^[ \t]*\.vidioc_[gs]_ctrl\s*=\s*\w+\s*,[ \t]*\n", "", text, flags=re.M)
+		text2 = re.sub(r"^[ \t]*\.vidioc_(?:[gs]_ctrl|queryctrl)\s*=\s*\w+\s*,[ \t]*\n", "", text, flags=re.M)
 		if text2 != text:
 			note(path, "v4l2 g/s_ctrl")
 			text = text2
