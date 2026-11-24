@@ -72,7 +72,7 @@ REPOS=(
 
 # The vendor configuration as the techpacks see it (env.sh)
 TPCONF=$ROOT/out/tp-autoconf.h
-soc_autoconf "$TPCONF"
+soc_autoconf "$TPCONF" techpacks
 
 SYMS=$S/Module.symvers
 addsym() { case " $SYMS " in *" $1 "*) ;; *) SYMS="$SYMS $1";; esac; }

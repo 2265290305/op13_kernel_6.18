@@ -47,7 +47,13 @@ soc_autoconf() {
 	grep -q 'CONFIG_ARCH_SUN' "$1" || { echo "soc_autoconf: CONFIG_ARCH_SUN is not in the SoC configuration"; return 1; }
 	# OnePlus' feature switches for its own modules (device/op13/oplus-features.config): the SoC repo's
 	# sun configuration is Qualcomm's and has none; OnePlus' code is built as OnePlus builds it
-	awk -F= '/^CONFIG_/ { n = $1; if ($2 == "m") n = n "_MODULE"; printf "#ifndef %s\n#define %s 1\n#endif\n", n, n }' \
+	# soc_autoconf OUT techpacks: less the switches that make code call into OnePlus' modules, built
+	# after the techpacks: MM_OSVELTE has KGSL register with mm_osvelte's memory tracker
+	# (register_mtrack_debugger), and modpost failed msm_kgsl -- and with it every image (run
+	# 45427714881). The GPU does not wait on a memory statistics module that may not build.
+	local drop=" "
+	[ "$2" = techpacks ] && drop=" CONFIG_OPLUS_FEATURE_MM_OSVELTE "
+	awk -F= -v drop="$drop" '/^CONFIG_/ && !index(drop, " " $1 " ") { n = $1; if ($2 == "m") n = n "_MODULE"; printf "#ifndef %s\n#define %s 1\n#endif\n", n, n }' \
 		"$ROOT/device/op13/oplus-features.config" >> "$1"
 }
 
@@ -66,5 +72,14 @@ oplus_overlay() {
 		[ -e "$d/${l#include/}" ] && continue
 		mkdir -p "$d/$(dirname "${l#include/}")"
 		ln -sfn "$t/$rel" "$d/${l#include/}"
+	done
+	# headers the SoC repo carries as old copies instead of links (with oplus_midplat.h, which
+	# _data_ocdt.h includes from its own directory): its oplus_project.h/_data_ocdt.h have
+	# no FACTORY_MODE (OnePlus' wireless pen) and number PCB_VERSION otherwise than the project
+	# info module, built from TREE's kernel/boot/include, does
+	for l in oplus_project.h oplus_project_data_ocdt.h oplus_midplat.h; do
+		[ -e "$t/kernel/boot/include/$l" ] && [ ! -e "$d/soc/oplus/system/$l" ] || continue
+		mkdir -p "$d/soc/oplus/system"
+		ln -sfn "$t/kernel/boot/include/$l" "$d/soc/oplus/system/$l"
 	done
 }
