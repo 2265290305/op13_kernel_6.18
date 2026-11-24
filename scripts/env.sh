@@ -77,9 +77,13 @@ oplus_overlay() {
 	# _data_ocdt.h includes from its own directory): its oplus_project.h/_data_ocdt.h have
 	# no FACTORY_MODE (OnePlus' wireless pen) and number PCB_VERSION otherwise than the project
 	# info module, built from TREE's kernel/boot/include, does
-	for l in oplus_project.h oplus_project_data_ocdt.h oplus_midplat.h; do
-		[ -e "$t/kernel/boot/include/$l" ] && [ ! -e "$d/soc/oplus/system/$l" ] || continue
-		mkdir -p "$d/soc/oplus/system"
-		ln -sfn "$t/kernel/boot/include/$l" "$d/soc/oplus/system/$l"
+	# and links OnePlus' own kernel tree has that the SoC repo has not (geas: <linux/geas_ctrl.h>)
+	for l in soc/oplus/system/oplus_project.h:kernel/boot/include/oplus_project.h \
+		soc/oplus/system/oplus_project_data_ocdt.h:kernel/boot/include/oplus_project_data_ocdt.h \
+		soc/oplus/system/oplus_midplat.h:kernel/boot/include/oplus_midplat.h \
+		linux/geas_ctrl.h:kernel/cpu/game_opt/geas_ctrl.h; do
+		[ -e "$t/${l#*:}" ] && [ ! -e "$d/${l%%:*}" ] || continue
+		mkdir -p "$d/$(dirname "${l%%:*}")"
+		ln -sfn "$t/${l#*:}" "$d/${l%%:*}"
 	done
 }

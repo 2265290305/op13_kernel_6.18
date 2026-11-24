@@ -176,7 +176,7 @@ PY
 				MO=$P/obj/$name
 				mkdir -p "$MO"
 				"${KMAKE[@]}" -k M="$T/$pkg" MO="$MO" OPMOD="$base" modules -j1 KBUILD_EXTRA_SYMBOLS="$SYMS" \
-					NOSTDINC_FLAGS="-nostdinc -I$P/inc -I$S/include -I$S/include/uapi -idirafter $W/inc8750 -idirafter $C" \
+					NOSTDINC_FLAGS="-nostdinc -I$P/inc -I$S/include -I$S/include/uapi -idirafter $W/inc8750 -idirafter $C -idirafter $S" \
 					KCFLAGS="-Wno-error -include $CONF" > "$LOG/$(basename "$P")-$name.log" 2>&1
 				echo "$? $MO/$base.ko" > "$MO/.result"
 			) < /dev/null &
@@ -242,7 +242,7 @@ PY
 		set +e
 		# shellcheck disable=SC2086
 		"${KMAKE[@]}" -k M="$T/$dir" MO="$MO" modules -j"$J" KBUILD_EXTRA_SYMBOLS="$MO/extra.symvers" $vars \
-			NOSTDINC_FLAGS="-nostdinc -I$P/inc -I$S/include -I$S/include/uapi -idirafter $W/inc8750 -idirafter $C" \
+			NOSTDINC_FLAGS="-nostdinc -I$P/inc -I$S/include -I$S/include/uapi -idirafter $W/inc8750 -idirafter $C -idirafter $S" \
 			KCFLAGS="-Wno-error -include $CONF $defs" > "$LOG/$tag.log" 2>&1
 		rc=$?
 		set -e
@@ -268,7 +268,7 @@ PY2
 				MO1=$MO-$n; mkdir -p "$MO1"; cp "$MO/extra.symvers" "$MO1/"
 				set +e
 				"${KMAKE[@]}" -k M="$T/$dir" MO="$MO1" modules -j"$J" KBUILD_EXTRA_SYMBOLS="$MO1/extra.symvers" "$o1=m" \
-					NOSTDINC_FLAGS="-nostdinc -I$P/inc -I$S/include -I$S/include/uapi -idirafter $W/inc8750 -idirafter $C" \
+					NOSTDINC_FLAGS="-nostdinc -I$P/inc -I$S/include -I$S/include/uapi -idirafter $W/inc8750 -idirafter $C -idirafter $S" \
 					KCFLAGS="-Wno-error -include $CONF -D${o1}_MODULE=1" > "$LOG/$tag-$n.log" 2>&1
 				set -e
 				ko=$(find "$MO1" -name "$n.ko" -o -name "$(echo "$n" | tr '_' '-').ko" | head -1)
