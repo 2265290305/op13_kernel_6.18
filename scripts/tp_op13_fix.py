@@ -8,6 +8,29 @@ import sys
 
 # (file, old, new)
 EDITS = [
+    # FastRPC: the OnePlus 13's DT (sun) names its DSPs the old way -- label "adsp"/"cdsp", no
+    # dsp-type, no instance-id -- and the SM8850 driver rejected every channel ("DSP label adsp
+    # specified in DT is invalid", retried without end: test-46 flooded pstore, nothing reached
+    # the DSPs). Those labels as the legacy domains the driver keeps for them: LPASS 0 = adsp,
+    # NSP 0 = cdsp, NSP 1 = cdsp1, SDSP 0 = slpi, so user space keeps its domain ids.
+    ("dsp-kernel/dsp/fastrpc.c",
+     "\t/* Validate the label retrieved from DT */\n\tfor (int i = 1; i < FASTRPC_MAX_DSP_TYPE; i++) {\n",
+     "\t/* op13: the OnePlus 13's DT labels (scripts/tp_op13_fix.py) */\n"
+     "\tif (!of_property_present(rdev->of_node, \"dsp-type\")) {\n"
+     "\t\tstatic const struct { const char *old, *label; u32 type, instance; } k618_legacy[] = {\n"
+     "\t\t\t{ \"adsp\", \"lpass\", FASTRPC_LPASS, 0 }, { \"cdsp\", \"nsp\", FASTRPC_NSP, 0 },\n"
+     "\t\t\t{ \"cdsp1\", \"nsp\", FASTRPC_NSP, 1 }, { \"sdsp\", \"sdsp\", FASTRPC_SDSP, 0 },\n"
+     "\t\t\t{ \"slpi\", \"sdsp\", FASTRPC_SDSP, 0 },\n"
+     "\t\t};\n\n"
+     "\t\tfor (int i = 0; i < ARRAY_SIZE(k618_legacy); i++) {\n"
+     "\t\t\tif (strcmp(label, k618_legacy[i].old))\n\t\t\t\tcontinue;\n"
+     "\t\t\terr = fastrpc_add_domain_to_table(domain, k618_legacy[i].type,\n"
+     "\t\t\t\t\tk618_legacy[i].label, k618_legacy[i].instance);\n"
+     "\t\t\tif (err < 0)\n"
+     "\t\t\t\tdev_err(rdev, \"Error %d: %s: failed to add legacy domain %s\\n\",\n"
+     "\t\t\t\t\terr, __func__, label);\n"
+     "\t\t\treturn err;\n\t\t}\n\t}\n\n"
+     "\t/* Validate the label retrieved from DT */\n\tfor (int i = 1; i < FASTRPC_MAX_DSP_TYPE; i++) {\n"),
     # sun_perf_gpuconf has KGSL_USE_SHMEM: android_rvh_shmem_get_folio passes the folio order since
     # 6.12.18 -- in 6.18 too, not only up to 6.13
     ("graphics-kernel/kgsl_sharedmem.c",

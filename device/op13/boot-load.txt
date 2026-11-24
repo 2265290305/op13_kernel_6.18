@@ -1,0 +1,5 @@
+# New drivers boot.img loads too, in their stock place (not only boot-full.img): ones the boot
+# cannot finish without and that have loaded cleanly in boot-full.
+# tango32: OnePlus' 32-bit app translator support -- without it zygote_secondary (tango_translator)
+# dies at once, and its restarts hold the system at "system is not ready" (test-46).
+tango32

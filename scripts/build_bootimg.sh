@@ -112,6 +112,10 @@ cp "$O/modules.builtin" "$O/modules.builtin.modinfo" "$T/mods/lib/modules/$REL/"
 # differ is left out with what needs it, instead of costing the image (below)
 NEW=$B/vendormods.list
 cat "$ROOT/out/vendormods.list" "$ROOT/out/soc-forced.txt" 2>/dev/null | sort -u > "$NEW" || : > "$NEW"
+# boot.img holds the new ones, less those both images load (device/op13/boot-load.txt)
+NEW_BOOT=$B/vendormods-held.list
+grep -vxF -f <(sed -e 's/#.*//' -e '/^[[:space:]]*$/d' "$ROOT/device/op13/boot-load.txt" 2>/dev/null) "$NEW" > "$NEW_BOOT" \
+	|| cp "$NEW" "$NEW_BOOT"
 for try in 1 2 3 4; do
 	rm -rf "$T/rd/lib/modules" && mkdir -p "$T/rd/lib/modules"
 	depmod -b "$T/mods" -F "$O/System.map" -e "$REL" 2> "$B/depmod.err" || true
@@ -121,7 +125,7 @@ for try in 1 2 3 4; do
 	sed -e 's|kernel/|/lib/modules/|g' "$M/modules.dep" > "$T/rd/lib/modules/modules.dep"
 	cp "$M/modules.alias" "$M/modules.softdep" "$M/modules.builtin" "$M/modules.builtin.modinfo" "$T/rd/lib/modules/"
 	# boot.img: the new drivers in the layer, loaded by nothing (boot-full.img loads them, below)
-	python3 -I "$ROOT/scripts/mklists.py" "$T/rd/lib/modules" "$ST" "$B" "$NEW" hold
+	python3 -I "$ROOT/scripts/mklists.py" "$T/rd/lib/modules" "$ST" "$B" "$NEW_BOOT" hold
 	# every versioned import of every module against its provider (the kernel or another module of the
 	# layer): one that differs is refused at load, so no image (the reference's k618_stage_crc.py)
 	set +e

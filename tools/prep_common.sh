@@ -543,6 +543,37 @@ PY
 	echo "android_rvh_commit_creds added"
 fi
 
+# of_iommu_get_resv_regions(): an "iommu-addresses" entry that does not translate (of_translate_dma_
+# region() returns NULL, length left unset) ends that region's list instead of the next entry being
+# read through the NULL pointer. test-46 (boot-full): the Wi-Fi chip's PCIe device (cnss2 ->
+# msm_pcie_enumerate -> arm_smmu_get_resv_regions) oopsed there in the first stage ("Cannot reserve
+# IOVA region of 0 size", then a NULL read), the probe worker died with its locks held and the
+# first stage never finished.
+OI=$C/drivers/iommu/of_iommu.c
+if ! grep -q 'op13: an entry that does not translate' $OI; then
+	python3 -I - "$OI" <<'PY'
+import sys
+p = sys.argv[1]
+t = open(p).read()
+old = ("\t\t\t\tphys_addr_t iova;\n\t\t\t\tsize_t length;\n")
+new = ("\t\t\t\tphys_addr_t iova;\n\t\t\t\tsize_t length = 0;\n")
+assert t.count(old) == 1, "of_iommu length"
+t = t.replace(old, new, 1)
+old = ("\t\t\t\tmaps = of_translate_dma_region(np, maps, &iova, &length);\n"
+       "\t\t\t\tif (length == 0) {\n")
+new = ("\t\t\t\tmaps = of_translate_dma_region(np, maps, &iova, &length);\n"
+       "\t\t\t\tif (!maps) {\t/* op13: an entry that does not translate ends the list */\n"
+       "\t\t\t\t\tdev_warn(dev, \"cannot translate IOVA region in %pOF\\n\", it.node);\n"
+       "\t\t\t\t\tbreak;\n\t\t\t\t}\n"
+       "\t\t\t\tif (length == 0) {\n")
+assert t.count(old) == 1, "of_iommu translate"
+t = t.replace(old, new, 1)
+open(p, "w").write(t)
+PY
+	grep -q 'op13: an entry that does not translate' $OI || { echo "of_iommu: edit failed"; exit 1; }
+	echo "of_iommu_get_resv_regions: untranslatable entries end the list"
+fi
+
 # built-in initramfs (our module layer) unpacked after the bootloader's ramdisks, so it wins
 python3 -I - "$REF" "$C" <<'PY'
 import sys
