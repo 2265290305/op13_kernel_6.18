@@ -676,6 +676,15 @@ def fix(path):
 	if text2 != text:
 		note(path, "hrtimer get_time")
 		text = text2
+	# eventfd_signal() takes no count since 6.8 (it was 1)
+	text2 = re.sub(r"\beventfd_signal\(\s*([^,()]+?)\s*,\s*1\s*\)", r"eventfd_signal(\1)", text)
+	# page_memcg() is gone: the page's folio's
+	text2 = re.sub(r"\bpage_memcg\(\s*([\w>.-]+)\s*\)", r"folio_memcg(page_folio(\1))", text2)
+	# struct memory_notify has no status_change_nid (6.17+): the node of the range's first page
+	text2 = re.sub(r"\b(\w+)->status_change_nid\b", r"pfn_to_nid(\1->start_pfn)", text2)
+	if text2 != text:
+		note(path, "eventfd/page_memcg/memory_notify")
+		text = text2
 	# page_mapcount() is gone (6.15): a page's folio's mapcount
 	text2 = re.sub(r"\bpage_mapcount\(\s*(\w+)\s*\)", r"folio_mapcount(page_folio(\1))", text)
 	if text2 != text:
