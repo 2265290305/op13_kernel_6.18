@@ -119,6 +119,8 @@ RULES = [
 	# source (build_vendor.sh puts it after every other include directory)
 	("kernel headers", re.compile(r'#include\s*"(?:\.\./)+(kernel/(?:irq|sched|locking|time|cgroup|workqueue|rcu)/[\w./-]+\.h)"'),
 		r"#include <\1>"),
+	# cfs_rq.h_nr_running is h_nr_queued since 6.14 (h_nr_runnable leaves the delayed ones out)
+	("h_nr_queued", re.compile(r"\bh_nr_running\b"), "h_nr_queued"),
 	# dma_fence_ops lost its debug printers (6.12); __dma_fence_is_later takes the fence first (6.13)
 	("dma-fence", re.compile(r"^[ \t]*\.(?:fence|timeline)_value_str\s*=\s*\w+\s*,[ \t]*\n", re.M), ""),
 	("dma-fence", re.compile(r"\b__dma_fence_is_later\(\s*([^,()]+?)\s*,\s*([^,()]+?)\s*,\s*(\w+)->ops\s*\)"),

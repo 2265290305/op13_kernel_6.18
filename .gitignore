@@ -7,3 +7,4 @@
 /dist/
 *.img
 __pycache__/
+/vendor/

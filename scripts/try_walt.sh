@@ -12,6 +12,8 @@ W=$ROOT/out/walt-try
 rm -rf "$W" && mkdir -p "$W/inc/linux"
 cp -r "$S/kernel/sched/walt" "$W/walt"
 python3 -I "$ROOT/scripts/vendor_fix618.py" "$W/walt"
+# 6.18's pick_task() takes the rq_flags too (trial only: WALT's halt path has none to give)
+sed -i -E 's/\bpick_task\(\s*(\w+)\s*\)/pick_task(\1, NULL)/g' "$W"/walt/*.c
 CONF=$W/soc-autoconf.h
 soc_autoconf "$CONF"
 OMRG=$(find "$ROOT/out/vendor" -path '*cpu/oplus_omrg/oplus_omrg.h' 2>/dev/null | head -1)
@@ -25,7 +27,7 @@ m = re.search(r'name = "kernel/sched/walt/sched-walt",.*?srcs = \[(.*?)\]', t, r
 print(" ".join(s.split("/")[-1][:-2] + ".o" for s in re.findall(r'"([^"]+\.c)"', m.group(1))))
 PY
 )
-COPTS="-DCONFIG_OPLUS_FEATURE_SCHED_ASSIST -DCONFIG_OPLUS_SCHED_HALT_MASK_PRT -DCONFIG_OPLUS_FEATURE_FRAME_BOOST -DCONFIG_OPLUS_FEATURE_SCHED_EXT -DCONFIG_OPLUS_FEATURE_GEAS"
+COPTS="-DCONFIG_OPLUS_ADD_CORE_CTRL_MASK -DCONFIG_OPLUS_FEATURE_SCHED_ASSIST -DCONFIG_OPLUS_SCHED_HALT_MASK_PRT -DCONFIG_OPLUS_FEATURE_FRAME_BOOST -DCONFIG_OPLUS_FEATURE_SCHED_EXT -DCONFIG_OPLUS_FEATURE_GEAS"
 {
 	echo "obj-m += sched-walt.o"
 	echo "sched-walt-y := $OBJS"

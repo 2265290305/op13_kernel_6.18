@@ -73,3 +73,10 @@ if [ "$(git -C $SOC log -1 --format=%s)" != "Apply reference 6.18 SoC integratio
 	git -C $SOC -c user.name=op13-port -c user.email=op13-port@localhost commit -q -m "Apply reference 6.18 SoC integration"
 fi
 echo "src/soc: reference integration $(git -C $SOC rev-parse --short HEAD) (tree $want)"
+
+# The SoC repo's include/ has links into OnePlus' tree by OnePlus' layout (vendor/oplus beside the
+# kernel: include/linux/sa_common.h -> ../../../../vendor/oplus/kernel/cpu/sched/...), 28 of them
+# (scheduler, frame boost, hybridswap, mm, device info): vendor/oplus here, OnePlus' 6.12 release's
+# -- the SoC repo's own
+mkdir -p vendor && ln -sfn ../src/mods8850/vendor/oplus vendor/oplus
+echo "vendor/oplus -> $(readlink vendor/oplus): $(find src/soc -xtype l | wc -l) SoC repo links still dangling"
