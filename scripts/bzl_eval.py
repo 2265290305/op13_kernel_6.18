@@ -164,7 +164,8 @@ def ddk_module(name, srcs=(), out=None, local_defines=None, copts=None, includes
 	if defconfig:
 		for f in resolve_files(pkg, defconfig):
 			for line in open(os.path.join(ROOT, f), errors="ignore"):
-				m = re.match(r"(CONFIG_\w+)=(.*)", line.strip())
+				# "export CONFIG_X=y" too (dataipa's .conf files, which its genrule passes through sed)
+				m = re.match(r"(?:export\s+)?(CONFIG_\w+)=(.*)", line.strip())
 				if m:
 					conf[m.group(1)] = m.group(2).strip('"')
 					defs.append((m.group(1), m.group(2).strip('"')))
@@ -240,8 +241,9 @@ GENRULES = {}
 
 
 def genrule(name=None, outs=(), srcs=(), cmd="", **kw):
-	"""native.genrule: only the ones that concatenate their sources are understood."""
-	if not re.fullmatch(r"\s*cat\s+\$\(SRCS\)\s*>\s*\$@\s*", cmd or ""):
+	"""native.genrule: only the ones that concatenate their sources are understood (dataipa's
+	pipes them through sed -e 's/^export //g', which the defconfig reader does itself)."""
+	if not re.fullmatch(r"\s*cat\s+\$\(SRCS\)\s*(?:\|\s*sed\s+-e\s+'s/\^export //g?'\s*)?>\s*\$@\s*", cmd or ""):
 		return
 	pkg = CUR["pkg"]
 	files = resolve_files(pkg, list(srcs or []))

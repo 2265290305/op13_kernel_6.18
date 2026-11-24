@@ -232,6 +232,35 @@ PY
 			KCFLAGS="-Wno-error -include $CONF $defs" > "$LOG/$tag.log" 2>&1
 		rc=$?
 		set -e
+		# one file that does not build stops the whole directory (msm8750's clocks: tcsrcc-tuna took
+		# eleven others with it): each module not made is tried again on its own, with only the
+		# option that switches it on
+		if [ $rc -ne 0 ] && [ "$(echo $names | wc -w)" -gt 1 ]; then
+			for n in $names; do
+				[ -n "$(find "$MO" -name "$n.ko" -o -name "$(echo "$n" | tr '_' '-').ko" | head -1)" ] && continue
+				o1=$(python3 -I - "$T/$dir" "$n" <<'PY2'
+import os, re, sys
+d, n = sys.argv[1], sys.argv[2]
+for f in ("Makefile", "Kbuild"):
+	p = os.path.join(d, f)
+	if os.path.isfile(p):
+		t = open(p, errors="ignore").read().replace("\\\n", " ")
+		for m in re.finditer(r"^\s*obj-\$\((CONFIG_\w+)\)\s*[:+]?=\s*(.+)$", t, re.M):
+			if any(o[:-2].replace("-", "_") == n for o in m.group(2).split()):
+				print(m.group(1)); sys.exit(0)
+PY2
+)
+				[ -n "$o1" ] || continue
+				MO1=$MO-$n; mkdir -p "$MO1"; cp "$MO/extra.symvers" "$MO1/"
+				set +e
+				"${KMAKE[@]}" M="$T/$dir" MO="$MO1" modules -j"$J" KBUILD_EXTRA_SYMBOLS="$MO1/extra.symvers" "$o1=m" \
+					NOSTDINC_FLAGS="-nostdinc -I$P/inc -I$S/include -I$S/include/uapi -idirafter $W/inc8750 -idirafter $C" \
+					KCFLAGS="-Wno-error -include $CONF -D${o1}_MODULE=1" > "$LOG/$tag-$n.log" 2>&1
+				set -e
+				ko=$(find "$MO1" -name "$n.ko" -o -name "$(echo "$n" | tr '_' '-').ko" | head -1)
+				[ -n "$ko" ] && cp "$ko" "$MO/" && [ -f "$MO1/Module.symvers" ] && SYMS="$SYMS $MO1/Module.symvers"
+			done
+		fi
 		for n in $names; do
 			ko=$(find "$MO" -name "$n.ko" -o -name "$(echo "$n" | tr '_' '-').ko" | head -1)
 			if [ -n "$ko" ]; then

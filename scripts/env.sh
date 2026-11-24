@@ -22,7 +22,10 @@ export PATH
 export KBUILD_BUILD_HOST=build-host KBUILD_BUILD_USER=build-user KBUILD_BUILD_VERSION=1
 export KBUILD_BUILD_TIMESTAMP="Sat Nov 21 00:00:00 UTC 2026"
 # LOCALVERSION= (set, empty): the release is 6.18.<n> + CONFIG_LOCALVERSION, nothing appended
-KMAKE=(make -C "$C" O="$O" ARCH=arm64 LLVM=1 LLVM_IAS=1 LOCALVERSION=)
+# KCPPFLAGS: what Android's own builds give every compile, the kernel and each vendor module
+# (Kleaf's COMMON_KCFLAGS; the SoC repo's build.config.common): vendor code chooses its Android
+# paths by it -- qcacld's IOMMU setup, cnss, ... (KCPPFLAGS, not KCFLAGS: scripts set KCFLAGS)
+KMAKE=(make -C "$C" O="$O" ARCH=arm64 LLVM=1 LLVM_IAS=1 LOCALVERSION= KCPPFLAGS=-D__ANDROID_COMMON_KERNEL__)
 
 # soc_autoconf OUT: the vendor configuration as code built outside the SoC tree must see it -- the SoC
 # build's evaluated options (src/soc/gen/autoconf_vendor.h; the kernel's own autoconf.h has none of
