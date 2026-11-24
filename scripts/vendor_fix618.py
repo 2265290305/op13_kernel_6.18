@@ -531,6 +531,8 @@ def fix(path):
 	if re.search(r"\bblkdev_get_by_dev\s*\(", text) and "k618_blkdev_get_by_dev" not in text:
 		text = re.sub(r"\bblkdev_get_by_dev\s*\(", "k618_blkdev_get_by_dev(", text)
 		text = re.sub(r"\bblkdev_put\s*\(", "k618_blkdev_put(", text)
+		# set_blocksize() takes the opened file (6.10+): the one this shim opened for the bdev
+		text = re.sub(r"\bset_blocksize\s*\(", "k618_set_blocksize(", text)
 		marker = "k618_blkdev_put(" if text.find("k618_blkdev_put(") != -1 and \
 			text.find("k618_blkdev_put(") < text.find("k618_blkdev_get_by_dev(") else "k618_blkdev_get_by_dev("
 		text = insert_top_level(text, marker,
@@ -546,7 +548,12 @@ def fix(path):
 			"static void k618_blkdev_put(struct block_device *bdev, void *holder)\n{\n\tint i;\n\n"
 			"\tfor (i = 0; i < ARRAY_SIZE(k618_bdev_files); i++)\n"
 			"\t\tif (k618_bdev_files[i] && file_bdev(k618_bdev_files[i]) == bdev) {\n"
-			"\t\t\tfput(k618_bdev_files[i]);\n\t\t\tk618_bdev_files[i] = NULL;\n\t\t\treturn;\n\t\t}\n}\n")
+			"\t\t\tfput(k618_bdev_files[i]);\n\t\t\tk618_bdev_files[i] = NULL;\n\t\t\treturn;\n\t\t}\n}\n\n"
+			"static int __maybe_unused k618_set_blocksize(struct block_device *bdev, int size)\n{\n\tint i;\n\n"
+			"\tfor (i = 0; i < ARRAY_SIZE(k618_bdev_files); i++)\n"
+			"\t\tif (k618_bdev_files[i] && file_bdev(k618_bdev_files[i]) == bdev)\n"
+			"\t\t\treturn set_blocksize(k618_bdev_files[i], size);\n"
+			"\treturn -EINVAL;\n}\n")
 		note(path, "blkdev_get_by_dev")
 	# attribute_group.bin_attrs holds const pointers (6.15): the lists it is given become const
 	names = set(re.findall(r"\.bin_attrs\s*=\s*(\w+)\s*,", text))
@@ -650,6 +657,11 @@ def fix(path):
 		if text2 != text:
 			note(path, "device_find_child match")
 			text = text2
+	# page->index is gone (6.16, the folio's): hybridswap stores a sector in its bio pages' index
+	text2 = re.sub(r"(\bdest_pages\[\s*\w+\s*\])->index\b", r"page_folio(\1)->index", text)
+	if text2 != text:
+		note(path, "page index")
+		text = text2
 	# page_mapcount() is gone (6.15): a page's folio's mapcount
 	text2 = re.sub(r"\bpage_mapcount\(\s*(\w+)\s*\)", r"folio_mapcount(page_folio(\1))", text)
 	if text2 != text:
