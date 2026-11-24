@@ -353,9 +353,78 @@ def fix(path):
 	# struct fd: .file / .flags
 	for var in set(re.findall(r"\bstruct\s+fd\s+(\w+)", text)):
 		text2 = re.sub(r"\b%s\.file\b" % re.escape(var), "fd_file(%s)" % var, text)
+		# its flags are the low bits of .word (6.12): FDPUT_POS_UNLOCK set or tested there
+		text2 = re.sub(r"\b%s\.flags(\s*(?:\|=|&=?)\s*~?\s*FDPUT_)" % re.escape(var), r"%s.word\1" % var, text2)
 		if text2 != text:
 			note(path, "struct fd")
 			text = text2
+	# android_vh_page_should_be_protected lost its u64 *data argument (6.12 ACK); OnePlus' handlers
+	# never read it
+	text2 = re.sub(r"(s8\s+priority\s*,\s*)u64\s*\*\s*\w+\s*,(\s*int\s*\*\s*should_protect)", r"\1\2", text)
+	if text2 != text:
+		note(path, "page_should_be_protected hook")
+		text = text2
+	# blk_rq_map_kern() lost its request_queue argument (6.16): (q, rq, buf, len, gfp) -> (rq, ...)
+	text2 = re.sub(r"\bblk_rq_map_kern\(\s*[\w>.-]+\s*,(\s*[\w>.-]+\s*,[^,;()]+,[^,;()]+,[^,;()]+\))",
+		r"blk_rq_map_kern(\1", text)
+	if text2 != text:
+		note(path, "blk_rq_map_kern")
+		text = text2
+	# UTP_CMD_TYPE_DEV_MANAGE left ufshci.h (6.x: device commands are UFS_STORAGE ones); its value
+	if "UTP_CMD_TYPE_DEV_MANAGE" in text and "define UTP_CMD_TYPE_DEV_MANAGE" not in text:
+		text = re.sub(r"(\A(?:.*\n)*?#include\s*[<\"].*\n)",
+			r"\1#ifndef UTP_CMD_TYPE_DEV_MANAGE\n#define UTP_CMD_TYPE_DEV_MANAGE 0x2\t/* gone from ufshci.h (vendor_fix618.py) */\n#endif\n",
+			text, count=1)
+		note(path, "UTP_CMD_TYPE_DEV_MANAGE")
+	# NR_BOUNCE is gone (6.16, no bounce buffering left): it counted 0 pages here anyway
+	text2 = re.sub(r"\b(?:global_)?zone_page_state\(\s*(?:\w+\s*,\s*)?NR_BOUNCE\s*\)", "0UL", text)
+	if text2 != text:
+		note(path, "NR_BOUNCE")
+		text = text2
+	# dma_buf_get_each() is gone (6.16): the exported iterator walks the same list, a reference held
+	# on each buffer while the callback looks at it
+	if re.search(r"\bdma_buf_get_each\s*\(", text) and "k618_dma_buf_get_each" not in text:
+		text = re.sub(r"\bdma_buf_get_each\s*\(", "k618_dma_buf_get_each(", text)
+		first = text.index("k618_dma_buf_get_each(")
+		at, depth = 0, 0
+		for x in re.finditer(r"^[ \t]*#[ \t]*(if|ifdef|ifndef|endif|include)\b.*$", text, re.M):
+			if x.start() >= first:
+				break
+			if x.group(1) in ("if", "ifdef", "ifndef"):
+				depth += 1
+			elif x.group(1) == "endif":
+				depth = max(depth - 1, 0)
+			elif depth == 0:
+				at = x.end()
+		text = (text[:at] + "\n/* 6.16: dma_buf_get_each() is gone (vendor_fix618.py) */\n"
+			"static int k618_dma_buf_get_each(int (*cb)(const struct dma_buf *, void *), void *priv)\n{\n"
+			"\tstruct dma_buf *b;\n\tint ret = 0;\n\n"
+			"\tfor (b = dma_buf_iter_begin(); b; b = dma_buf_iter_next(b)) {\n"
+			"\t\tret = cb(b, priv);\n\t\tif (ret) {\n\t\t\tdma_buf_put(b);\n\t\t\tbreak;\n\t\t}\n\t}\n"
+			"\treturn ret;\n}\n" + text[at:])
+		if "MODULE_IMPORT_NS" not in text or "DMA_BUF" not in text:
+			text += '\nMODULE_IMPORT_NS("DMA_BUF");\n'
+		note(path, "dma_buf_get_each")
+	# page_mapcount() is gone (6.15): a page's folio's mapcount
+	text2 = re.sub(r"\bpage_mapcount\(\s*(\w+)\s*\)", r"folio_mapcount(page_folio(\1))", text)
+	if text2 != text:
+		note(path, "page_mapcount")
+		text = text2
+	# uprobe_consumer handlers take the session cookie (__u64 *data) since 6.12
+	text2 = re.sub(r"(\(\s*struct\s+uprobe_consumer\s*\*\s*\w+\s*,\s*(?:unsigned\s+long\s+\w+\s*,\s*)?"
+		r"struct\s+pt_regs\s*\*\s*\w+)\s*\)(\s*\{)", r"\1, __u64 *data)\2", text)
+	if text2 != text:
+		note(path, "uprobe handlers")
+		text = text2
+	# kernel/irq/internals.h has irq_is_nmi() itself (6.x): a file's own copy gets its own name; and
+	# desc->kstat_irqs is a per-CPU struct irqstat (its count in .cnt) since 6.10
+	if re.search(r"^static\s+(?:inline\s+)?bool\s+irq_is_nmi\s*\(", text, re.M) and "internals.h" in text:
+		text = re.sub(r"\birq_is_nmi\b", "k618_irq_is_nmi", text)
+		note(path, "irq_is_nmi")
+	text2 = re.sub(r"\*\s*per_cpu_ptr\(\s*([\w>.-]+?->kstat_irqs)\s*,\s*(\w+)\s*\)", r"per_cpu_ptr(\1, \2)->cnt", text)
+	if text2 != text:
+		note(path, "kstat_irqs")
+		text = text2
 	# nr_irqs is not exported in 6.18: irq_get_nr_irqs() (where the file has no nr_irqs of its own)
 	if re.search(r"\bnr_irqs\b", text) and not re.search(r"\b(?:int|unsigned|u32|u16|size_t)\s+(?:int\s+)?nr_irqs\b|->nr_irqs|\.nr_irqs", text):
 		text2 = re.sub(r"\bnr_irqs\b(?!\s*\()", "irq_get_nr_irqs()", text)
@@ -412,10 +481,20 @@ def fix(path):
 		# a function pointer to the snd_soc_unregister_component macro
 		if re.search(r"\bsnd_soc_unregister_component\b(?!\s*\()", text):
 			text = re.sub(r"\bsnd_soc_unregister_component\b(?!\s*\()", "k618_snd_soc_unregister_component", text)
-			# after the last #include before its first use (some files include more further down)
+			# after the last #include before its first use that no #if encloses (some files include
+			# more further down; aw882xx's last one sits in a version #if that is false)
 			first = text.index("k618_snd_soc_unregister_component")
-			m = [x for x in re.finditer(r"^#include\s*[<\"].*$", text, re.M) if x.end() < first]
-			at = m[-1].end() if m else 0
+			at, depth = 0, 0
+			for x in re.finditer(r"^[ \t]*#[ \t]*(if|ifdef|ifndef|endif|include)\b.*$", text, re.M):
+				if x.start() >= first:
+					break
+				d = x.group(1)
+				if d in ("if", "ifdef", "ifndef"):
+					depth += 1
+				elif d == "endif":
+					depth = max(depth - 1, 0)
+				elif depth == 0:
+					at = x.end()
 			text = (text[:at] + "\n/* 6.18: snd_soc_unregister_component() is a macro (vendor_fix618.py) */\n"
 				"static void k618_snd_soc_unregister_component(struct device *dev)\n"
 				"{\n\tsnd_soc_unregister_component_by_driver(dev, NULL);\n}\n" + text[at:])
