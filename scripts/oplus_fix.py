@@ -109,6 +109,10 @@ EDITS = [
     ("sys-memstat.c",
      "\tdir_entry = mtrack_procs[MTRACK_ASHMEM];\n\tif (dir_entry)\n\t\tcreate_ashmem_procfs(dir_entry);\n",
      "\t/* op13: no ashmem statistics on 6.18's Rust ashmem (scripts/oplus_fix.py) */\n"),
+    # android_vh_do_futex gained the futex address first (6.12 ACK); the handler does not use it
+    ("futex.c",
+     "static void android_vh_do_futex_handler(void *unused, int cmd,",
+     "static void android_vh_do_futex_handler(void *unused, u32 __user *uaddr, int cmd,"),
     ("oplus_uprobe.c",
      "static struct kprobe uprobe_unregister_kp = {\n\t.symbol_name = \"uprobe_unregister\"\n};",
      "static struct kprobe uprobe_unregister_kp = {\n\t.symbol_name = \"uprobe_unregister_nosync\"\n};"),
