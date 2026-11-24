@@ -220,6 +220,12 @@ EDITS = [
     # their defaults (cfg_mlme_fe_wlm.h's CFG_DEFAULT_*_EXT_FLAGS) instead of the ini lookup
     ("sme_api.c", "cfg_get(mac->psoc, CFG_LATENCY_FLAGS_LOW_EXT)", "\"0x184c03\" /* op13 */"),
     ("sme_api.c", "cfg_get(mac->psoc, CFG_LATENCY_FLAGS_ULTLOW_EXT)", "\"0x180c03\" /* op13 */"),
+    # the wireless pen (built from its Makefile) uses oplus_project.h's boot modes (FACTORY_MODE),
+    # which exist under OnePlus' Qualcomm platform switch, as its kernel config had it
+    ("oplus_cps8601.c",
+     "#ifndef CONFIG_DISABLE_OPLUS_FUNCTION\n#include <soc/oplus/system/oplus_project.h>",
+     "#ifndef CONFIG_OPLUS_SYSTEM_KERNEL_QCOM\t/* op13: scripts/oplus_fix.py */\n#define CONFIG_OPLUS_SYSTEM_KERNEL_QCOM 1\n#endif\n"
+     "#ifndef CONFIG_DISABLE_OPLUS_FUNCTION\n#include <soc/oplus/system/oplus_project.h>"),
 ]
 
 
