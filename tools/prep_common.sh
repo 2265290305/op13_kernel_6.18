@@ -574,6 +574,17 @@ PY
 	echo "of_iommu_get_resv_regions: untranslatable entries end the list"
 fi
 
+# a 4096-byte command line: the bootloader appends its own (msm_drm.dsi_display0=<panel>,
+# oplus_bsp_tp_custom.dsi_display0=<panel> ...) after the boot image's, and with ours the whole was
+# cut at 2048 (test-46: 2045 bytes kept, oplus_bsp_tp_custom.dsi_display0 gone -- the touch driver
+# found no panel, "commandline not match", and did not probe)
+CL=$C/arch/arm64/include/uapi/asm/setup.h
+if ! grep -q 'COMMAND_LINE_SIZE	4096' $CL; then
+	sed -i 's/^#define COMMAND_LINE_SIZE\t2048$/#define COMMAND_LINE_SIZE\t4096\t\/* op13: the bootloader appends after a long one *\//' $CL
+	grep -q 'COMMAND_LINE_SIZE	4096' $CL || { echo "command line size: edit failed"; exit 1; }
+	echo "command line size 4096"
+fi
+
 # built-in initramfs (our module layer) unpacked after the bootloader's ramdisks, so it wins
 python3 -I - "$REF" "$C" <<'PY'
 import sys
