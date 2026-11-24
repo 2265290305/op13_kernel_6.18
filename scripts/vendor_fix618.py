@@ -376,6 +376,12 @@ def fix(path):
 			r"\1#ifndef UTP_CMD_TYPE_DEV_MANAGE\n#define UTP_CMD_TYPE_DEV_MANAGE 0x2\t/* gone from ufshci.h (vendor_fix618.py) */\n#endif\n",
 			text, count=1)
 		note(path, "UTP_CMD_TYPE_DEV_MANAGE")
+	# alarm callbacks return void (6.18: enum alarmtimer_restart is gone). Every OnePlus/Qualcomm one
+	# returns ALARMTIMER_NORESTART -- none re-arms through its return value
+	if "enum alarmtimer_restart" in text and "ALARMTIMER_RESTART;" not in text:
+		text = re.sub(r"\benum\s+alarmtimer_restart\b", "void", text)
+		text = re.sub(r"\breturn\s+ALARMTIMER_NORESTART\s*;", "return;", text)
+		note(path, "alarm callbacks void")
 	# NR_BOUNCE is gone (6.16, no bounce buffering left): it counted 0 pages here anyway
 	text2 = re.sub(r"\b(?:global_)?zone_page_state\(\s*(?:\w+\s*,\s*)?NR_BOUNCE\s*\)", "0UL", text)
 	if text2 != text:

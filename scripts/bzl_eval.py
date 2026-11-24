@@ -240,6 +240,20 @@ def resolve_files(pkg, x):
 GENRULES = {}
 
 
+def write_file(name=None, out=None, content=(), **kw):
+	"""skylib's write_file: camera-kernel writes its whole defconfig with it (project_defconfig.bzl),
+	a no-op before -- camera was built with no options. Written under <tree>/.bzl_gen."""
+	if not name or not out:
+		return
+	pkg = CUR["pkg"]
+	rel = os.path.normpath(os.path.join(".bzl_gen", pkg, out))
+	os.makedirs(os.path.dirname(os.path.join(ROOT, rel)), exist_ok=True)
+	with open(os.path.join(ROOT, rel), "w") as f:
+		f.write("\n".join(str(c) for c in (content or [])))
+	for o in (name, out):
+		GENRULES[os.path.normpath(os.path.join(pkg, o))] = [rel]
+
+
 def genrule(name=None, outs=(), srcs=(), cmd="", **kw):
 	"""native.genrule: only the ones that concatenate their sources are understood (dataipa's
 	pipes them through sed -e 's/^export //g', which the defconfig reader does itself)."""
@@ -259,8 +273,10 @@ def ddk_headers(name, hdrs=(), includes=(), linux_includes=(), **kw):
 		"linux_includes": [os.path.normpath(os.path.join(pkg, i)) for i in linux_includes or ()],
 		"hdrs": [h for h in (hdrs or []) if isinstance(h, str)],
 		# header targets it gathers (Qualcomm's audio_headers is only a list of others)
-		"targets": ["%s:%s" % label_to_path(pkg, h) for h in (hdrs or []) if isinstance(h, str)
-			and (h.startswith(":") or h.startswith("//"))],
+		# (a bare target name is a label too: video's "sun_headers", "vidc_headers")
+		"targets": ["%s:%s" % label_to_path(pkg, h if h.startswith((":", "//")) else ":" + h)
+			for h in (hdrs or []) if isinstance(h, str)
+			and (h.startswith(":") or h.startswith("//") or re.fullmatch(r"[A-Za-z0-9_-]+", h))],
 	}
 
 
@@ -300,7 +316,7 @@ def shim_modules():
 		"//build/bazel_common_rules/dist:dist.bzl": {"copy_to_dist_dir": noop},
 		"@bazel_skylib//lib:paths.bzl": {"paths": paths},
 		"@bazel_skylib//lib:sets.bzl": {"sets": sets},
-		"@bazel_skylib//rules:write_file.bzl": {"write_file": noop},
+		"@bazel_skylib//rules:write_file.bzl": {"write_file": write_file},
 		"@rules_pkg//pkg:install.bzl": {"pkg_install": noop},
 		"@rules_pkg//pkg:mappings.bzl": {"pkg_files": noop, "strip_prefix": Anything(), "pkg_filegroup": noop},
 		"@bazel_skylib//rules:common_settings.bzl": {"bool_flag": noop, "string_flag": noop,
