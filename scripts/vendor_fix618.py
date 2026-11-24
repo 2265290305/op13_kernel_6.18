@@ -670,6 +670,12 @@ def fix(path):
 		if text2 != text:
 			note(path, "after_dequeue_task")
 			text = text2
+	# hrtimer_clock_base.get_time is gone (6.18): the timer's clock through hrtimer_cb_get_time()
+	text2 = re.sub(r"(&?)\b([\w.>-]+?)\.base->get_time\(\)", lambda m: "hrtimer_cb_get_time(&%s)" % m.group(2) if not m.group(1) else m.group(0), text)
+	text2 = re.sub(r"\b([\w>-]+?)->base->get_time\(\)", r"hrtimer_cb_get_time(\1)", text2)
+	if text2 != text:
+		note(path, "hrtimer get_time")
+		text = text2
 	# page_mapcount() is gone (6.15): a page's folio's mapcount
 	text2 = re.sub(r"\bpage_mapcount\(\s*(\w+)\s*\)", r"folio_mapcount(page_folio(\1))", text)
 	if text2 != text:
