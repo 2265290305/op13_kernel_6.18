@@ -406,40 +406,58 @@ $(ls "$ROOT"/out/tp-log/*.symvers 2>/dev/null | tr '\n' ' ')"
 	[ -f "$W/soc-modules.order.saved" ] && mv "$W/soc-modules.order.saved" "$S/modules.order"
 fi
 
-# OnePlus/Qualcomm modules that failed only for symbols a late SoC module exports (swr_haptics:
-# qcom-hv-haptics' register_hboost_event_notifier), built once more now that those are there
+# a second chance for what failed only because something it links against was not built yet when
+# it was tried: modules whose only errors are undefined symbols that are all exported by now (by a
+# module built later in the run, the late SoC modules -- swr_haptics: qcom-hv-haptics'
+# register_hboost_event_notifier -- or one built in the other pass: file_read_record and
+# mm_osvelte's oplus_read_mm_config), and modules left out for a dependency that is built now.
+# Twice: one built here can complete another.
 LATE=$(find "$ROOT/out/soc-late" -name Module.symvers 2>/dev/null | tr '\n' ' ')
-if [ -n "$LATE" ]; then
-	SYMS="$SYMS $LATE"
+SYMS="$SYMS $LATE"
+for round in 1 2; do
+	# every symbol exported by now
+	cat $SYMS "$O/Module.symvers" "$S/Module.symvers" 2>/dev/null | awk '{ print $2 }' | sort -u > "$W/exported.txt"
+	ls "$OUTM" "$HAVE" 2>/dev/null | sed -n 's/\.ko$//p' | sort -u > "$W/built.txt"
+	again=0
 	for P in "$P1" ${P2:+"$P2"}; do
-		[ -f "$P/failed" ] || continue
+		[ -f "$P/failed" ] && [ -f "$P/levels.txt" ] || continue
 		while read -r name; do
-			L=$LOG/$(basename "$P")-$name.log
-			[ -f "$L" ] && grep -q '^ERROR: modpost: .* undefined!' "$L" || continue
-			grep -qE ': (fatal )?error: ' "$L" && continue
-			still=0
-			for sym in $(sed -n -E 's/^ERROR: modpost: "([^"]+)" .* undefined!/\1/p' "$L"); do
-				cat $LATE | awk -v s="$sym" '$2 == s { f = 1 } END { exit !f }' || still=1
-			done
-			[ "$still" -eq 0 ] || continue
-			pkg=; base=
-			IFS='|' read -r _l _n pkg base _needs < <(awk -F'|' -v n="$name" '$2 == n' "$P/levels.txt") || true
+			pkg=; base=; needs=
+			IFS='|' read -r _l _n pkg base needs < <(awk -F'|' -v n="$name" '$2 == n' "$P/levels.txt") || true
 			[ -n "$pkg" ] || continue
+			grep -qx "$base" "$W/built.txt" && continue
+			L=$LOG/$(basename "$P")-$name.log
+			if [ -f "$L" ]; then
+				grep -q '^ERROR: modpost: .* undefined!' "$L" || continue
+				grep -qE ': (fatal )?error: ' "$L" && continue
+				sed -n -E 's/^ERROR: modpost: "([^"]+)" .* undefined!/\1/p' "$L" | sort -u > "$W/need.txt"
+				[ -z "$(comm -23 "$W/need.txt" "$W/exported.txt")" ] || continue
+			else
+				# left out: all it needs built by now
+				missing=0
+				for d in $needs; do grep -qx "$d" "$W/built.txt" || missing=1; done
+				[ "$missing" -eq 0 ] || continue
+			fi
 			MO=$P/obj/$name
+			mkdir -p "$MO"
 			set +e
-			"${KMAKE[@]}" -k M="$P/tree/$pkg" MO="$MO" OPMOD="$base" modules -j"$J" KBUILD_EXTRA_SYMBOLS="$SYMS" \
+			MAKEFLAGS="$JOBSERVER" "${KMAKE[@]}" -k M="$P/tree/$pkg" MO="$MO" OPMOD="$base" modules KBUILD_EXTRA_SYMBOLS="$SYMS" \
 				NOSTDINC_FLAGS="-nostdinc -I$P/inc -I$S/include -I$S/include/uapi -idirafter $W/inc8750 -idirafter $C -idirafter $S" \
-				KCFLAGS="-Wno-error -include $CONF" > "$L.late" 2>&1
+				KCFLAGS="-Wno-error -include $CONF" > "$L.retry$round" 2>&1
 			set -e
 			if [ -f "$MO/$base.ko" ]; then
-				echo "build_vendor: $name: built ($(basename "$P"), after the late SoC modules)" | tee -a "$LOG/summary.txt"
-				cp "$MO/$base.ko" "$OUTM/"; ok=$((ok + 1))
+				echo "build_vendor: $name: built ($(basename "$P"), second chance $round)" | tee -a "$LOG/summary.txt"
+				cp "$MO/$base.ko" "$OUTM/"; ok=$((ok + 1)); again=1
+				echo "$base" >> "$W/built.txt"
+				[ -f "$MO/Module.symvers" ] && SYMS="$SYMS $MO/Module.symvers"
 			else
-				echo "build_vendor: $name: FAILED again after the late SoC modules ($L.late)" | tee -a "$LOG/summary.txt"
+				echo "build_vendor: $name: FAILED again ($(basename "$P"), $L.retry$round)" | tee -a "$LOG/summary.txt"
+				grep -E ': (fatal )?error: |^ERROR: modpost' "$L.retry$round" | head -4 | tee -a "$LOG/summary.txt" || true
 			fi
 		done < "$P/failed"
 	done
-fi
+	[ "$again" -eq 1 ] || break
+done
 
 n=$(still_wanted "$LOG/failed.txt")
 ls "$OUTM" | sed 's/\.ko$//' > "$ROOT/out/vendormods.list"
