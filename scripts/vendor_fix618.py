@@ -111,6 +111,9 @@ def fix_platform_remove(text, path):
 
 RULES = [
 	("asm/unaligned.h", re.compile(r"#include\s*<asm/unaligned\.h>"), "#include <linux/unaligned.h>"),
+	# zpool is gone (6.18, CONFIG_ZPOOL with it): its header only where the zpool code still is
+	("zpool.h", re.compile(r"(?<!#ifdef CONFIG_ZPOOL\n)^#include\s*<linux/zpool\.h>[ \t]*$", re.M),
+		"#ifdef CONFIG_ZPOOL\n#include <linux/zpool.h>\n#endif"),
 	("strlcpy", re.compile(r"\bstrlcpy\s*\("), "strscpy("),
 	("pwm_apply_state", re.compile(r"\bpwm_apply_state\s*\("), "pwm_apply_might_sleep("),
 	("ANDROID_KABI", re.compile(r"\bandroid_kabi_reserved(\d+)\b"), r"__kabi_reserved\1"),
