@@ -61,10 +61,13 @@ def wrap_external_remove(text, path):
 		if not m or m.group(1).startswith("k618_"):
 			continue
 		f = m.group(1)
-		if re.search(r"\b(?:int|void)\s+(?:__exit\s+)?%s\s*\(\s*struct\s+platform_device" % re.escape(f), text):
-			continue		# defined (or declared) here: fix_platform_remove's
+		# defined (or declared) here: fix_platform_remove's -- unless the same function is also
+		# stored in another int-returning pointer (pogo_keyboard: client->remove = it), which keeps it int
+		if re.search(r"\b(?:int|void)\s+(?:__exit\s+)?%s\s*\(\s*struct\s+platform_device" % re.escape(f), text) \
+				and not re.search(r"->\s*\w+\s*=\s*%s\s*;" % re.escape(f), text):
+			continue
 		wrap = ("/* 6.18: platform_driver.remove returns void (vendor_fix618.py) */\n"
-			"static void k618_remove_%s(struct platform_device *pdev)\n{\n\t%s(pdev);\n}\n\n") % (f, f)
+			"static void k618_remove_%s(struct platform_device *pdev)\n{\n\t(void)%s(pdev);\n}\n\n") % (f, f)
 		newblk = blk.group(0).replace(m.group(0), m.group(0).replace(f, "k618_remove_" + f), 1)
 		text = text.replace(blk.group(0), wrap + newblk, 1)
 		note(path, "platform remove (wrapper)")
@@ -134,6 +137,22 @@ RULES = [
 		r"(const struct ctl_table *\1"),
 ]
 DAIFMT = {"S": "C", "M": "P"}
+
+
+def insert_top_level(text, marker, code):
+	"""code placed after the last #include ahead of marker's first use that no #if encloses."""
+	first = text.index(marker)
+	at, depth = 0, 0
+	for x in re.finditer(r"^[ \t]*#[ \t]*(if|ifdef|ifndef|endif|include)\b.*$", text, re.M):
+		if x.start() >= first:
+			break
+		if x.group(1) in ("if", "ifdef", "ifndef"):
+			depth += 1
+		elif x.group(1) == "endif":
+			depth = max(depth - 1, 0)
+		elif depth == 0:
+			at = x.end()
+	return text[:at] + "\n" + code + text[at:]
 
 
 def include_if(text, used, header):
@@ -376,6 +395,30 @@ def fix(path):
 			r"\1#ifndef UTP_CMD_TYPE_DEV_MANAGE\n#define UTP_CMD_TYPE_DEV_MANAGE 0x2\t/* gone from ufshci.h (vendor_fix618.py) */\n#endif\n",
 			text, count=1)
 		note(path, "UTP_CMD_TYPE_DEV_MANAGE")
+	# cpufreq_get_policy() is gone (6.x): what it did -- a copy of the CPU's policy -- through
+	# cpufreq_cpu_get()/cpufreq_cpu_put() (game_opt)
+	if re.search(r"\bcpufreq_get_policy\s*\(", text) and "k618_cpufreq_get_policy" not in text \
+			and not re.search(r"^\w[^;]*\bcpufreq_get_policy\s*\([^;]*\)\s*\{", text, re.M):
+		text = re.sub(r"\bcpufreq_get_policy\s*\(", "k618_cpufreq_get_policy(", text)
+		text = insert_top_level(text, "k618_cpufreq_get_policy(",
+			"/* 6.x: cpufreq_get_policy() is gone (vendor_fix618.py) */\n"
+			"static int k618_cpufreq_get_policy(struct cpufreq_policy *policy, unsigned int cpu)\n{\n"
+			"\tstruct cpufreq_policy *p = cpufreq_cpu_get(cpu);\n\n"
+			"\tif (!p)\n\t\treturn -EINVAL;\n\tmemcpy(policy, p, sizeof(*policy));\n"
+			"\tcpufreq_cpu_put(p);\n\treturn 0;\n}\n")
+		note(path, "cpufreq_get_policy")
+	# file->f_path is const (6.13)
+	text2 = re.sub(r"(?<!const )\bstruct\s+path\s*\*\s*(\w+)\s*=\s*(&\s*\(?[^;]*->\s*f_path\s*\)?\s*;)",
+		r"const struct path *\1 = \2", text)
+	if text2 != text:
+		note(path, "const f_path")
+		text = text2
+	# wakeup sources in a header too (the fingerprint driver's wakelock.h): <linux/device.h>
+	if path.endswith(".h") and re.search(r"\bwakeup_source_(?:add|remove|create|register)\s*\(", text) \
+			and "linux/device.h" not in text and "pm_wakeup.h" not in text:
+		text, did = include_if(text, r".", "linux/device.h")
+		if did:
+			note(path, "include linux/device.h")
 	# alarm callbacks return void (6.18: enum alarmtimer_restart is gone). Every OnePlus/Qualcomm one
 	# returns ALARMTIMER_NORESTART -- none re-arms through its return value
 	if "enum alarmtimer_restart" in text and "ALARMTIMER_RESTART;" not in text:
