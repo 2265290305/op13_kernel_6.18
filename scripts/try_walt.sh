@@ -12,6 +12,8 @@ W=$ROOT/out/walt-try
 rm -rf "$W" && mkdir -p "$W/inc/linux"
 cp -r "$S/kernel/sched/walt" "$W/walt"
 python3 -I "$ROOT/scripts/vendor_fix618.py" "$W/walt"
+# its trace header names its directory from the kernel's include/trace (../../kernel/sched/walt): here
+sed -i -E "s#(define[[:space:]]+TRACE_INCLUDE_PATH[[:space:]]+)\.[^[:space:]]*#\1$W/walt#" "$W"/walt/*.h
 # 6.18's pick_task() takes the rq_flags too (trial only: WALT's halt path has none to give)
 sed -i -E 's/\bpick_task\(\s*(\w+)\s*\)/pick_task(\1, NULL)/g' "$W"/walt/*.c
 CONF=$W/soc-autoconf.h
