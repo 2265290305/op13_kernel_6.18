@@ -226,6 +226,13 @@ EDITS = [
      "#ifndef CONFIG_DISABLE_OPLUS_FUNCTION\n#include <soc/oplus/system/oplus_project.h>",
      "#ifndef CONFIG_OPLUS_SYSTEM_KERNEL_QCOM\t/* op13: scripts/oplus_fix.py */\n#define CONFIG_OPLUS_SYSTEM_KERNEL_QCOM 1\n#endif\n"
      "#ifndef CONFIG_DISABLE_OPLUS_FUNCTION\n#include <soc/oplus/system/oplus_project.h>"),
+    # locking_strategy's rwsem.c keeps its own rwsem_owner()/is_rwsem_reader_owned(), which 6.18's
+    # linux/rwsem.h now declares (non-static): its copies under their own names
+    ("rwsem.c",
+     "static inline struct task_struct *rwsem_owner(struct rw_semaphore *sem)\n",
+     "/* op13: 6.18's rwsem.h declares these (scripts/oplus_fix.py) */\n"
+     "#define rwsem_owner k618_rwsem_owner\n#define is_rwsem_reader_owned k618_is_rwsem_reader_owned\n"
+     "static inline struct task_struct *rwsem_owner(struct rw_semaphore *sem)\n"),
 ]
 
 
