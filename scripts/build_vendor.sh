@@ -196,18 +196,25 @@ PY
 		mkdir -p "$MO"
 		vars=; defs=
 		for o in $opts; do vars="$vars $o=m"; defs="$defs -D${o}_MODULE=1"; done
-		# the symbol versions of everything built so far, less those of the modules this directory
-		# makes itself (its Makefile may make again one built already: modpost refuses an export twice)
-		python3 -I - "$T/$dir" "$MO/extra.symvers" $SYMS <<'PY'
+		# the symbol versions of everything built so far, less those of the modules this make makes
+		# itself (its Makefile may make again one built already: modpost refuses an export twice) --
+		# only those: obj-m and obj-$(CONFIG_X) with X one of ours or on in the kernel's configuration.
+		# The rest stay (pinctrl-tuna needs the SoC's pinctrl-msm, which sits in the same Makefile
+		# behind an option that is off here).
+		python3 -I - "$T/$dir" "$MO/extra.symvers" "$opts" "$O/include/config/auto.conf" $SYMS <<'PY'
 import os, re, sys
-d, out, files = sys.argv[1], sys.argv[2], sys.argv[3:]
+d, out, opts, autoconf, files = sys.argv[1], sys.argv[2], set(sys.argv[3].split()), sys.argv[4], sys.argv[5:]
+on = set(opts)
+if os.path.isfile(autoconf):
+	on |= {l.split("=")[0] for l in open(autoconf) if re.match(r"CONFIG_\w+=[ym]$", l.strip())}
 mine = set()
 for f in ("Makefile", "Kbuild"):
 	p = os.path.join(d, f)
 	if os.path.isfile(p):
 		t = open(p, errors="ignore").read().replace("\\\n", " ")
-		for m in re.finditer(r"^\s*obj-\S*\s*[:+]?=\s*(.+)$", t, re.M):
-			mine |= {o[:-2].replace("-", "_") for o in m.group(1).split() if o.endswith(".o")}
+		for m in re.finditer(r"^\s*obj-(m|\$\((CONFIG_\w+)\))\s*[:+]?=\s*(.+)$", t, re.M):
+			if m.group(1) == "m" or m.group(2) in on:
+				mine |= {o[:-2].replace("-", "_") for o in m.group(3).split() if o.endswith(".o")}
 with open(out, "w") as w:
 	for f in files:
 		if not os.path.isfile(f):
