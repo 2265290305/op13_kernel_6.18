@@ -72,6 +72,33 @@ EDITS = [
     ("zram_drv.c",
      "\t/* zram devices sort of resembles non-rotational disks */\n\tblk_queue_flag_set(QUEUE_FLAG_NONROT, zram->disk->queue);\n\tblk_queue_flag_set(QUEUE_FLAG_SYNCHRONOUS, zram->disk->queue);\n\n\t/*\n\t * To ensure that we always get PAGE_SIZE aligned\n\t * and n*PAGE_SIZED sized I/O requests.\n\t */\n\tblk_queue_physical_block_size(zram->disk->queue, PAGE_SIZE);\n\tblk_queue_logical_block_size(zram->disk->queue,\n\t\t\t\t\tZRAM_LOGICAL_BLOCK_SIZE);\n\tblk_queue_io_min(zram->disk->queue, PAGE_SIZE);\n\tblk_queue_io_opt(zram->disk->queue, PAGE_SIZE);\n\tzram->disk->queue->limits.discard_granularity = PAGE_SIZE;\n\tblk_queue_max_discard_sectors(zram->disk->queue, UINT_MAX);\n\n\t/*\n\t * zram_bio_discard() will clear all logical blocks if logical block\n\t * size is identical with physical block size(PAGE_SIZE). But if it is\n\t * different, we will skip discarding some parts of logical blocks in\n\t * the part of the request range which isn't aligned to physical block\n\t * size.  So we can't ensure that all discarded logical blocks are\n\t * zeroed.\n\t */\n\tif (ZRAM_LOGICAL_BLOCK_SIZE == PAGE_SIZE)\n\t\tblk_queue_max_write_zeroes_sectors(zram->disk->queue, UINT_MAX);\n\n\tblk_queue_flag_set(QUEUE_FLAG_STABLE_WRITES, zram->disk->queue);\n",
      '\t/* op13: non-rotational is the default, the rest is in lim above (blk_alloc_disk) */\n'),
+    # hybridswap's hybridmain.c: the same copied 6.6 memcg_vmstats_percpu as exit_mm_optimize (its
+    # memcg_page_state_local read swap usage through it) -> the exported memcg_page_state(); and
+    # the 6.6 hook android_vh_alloc_pages_slowpath(gfp, order, alloc_start), which 6.18 split into
+    # _start/_end -- _end fires where it did (got_pg) with the same gfp/order/start: an adapter
+    ("hybridmain.c",
+     "/*\n * FIXME : memcg->vmstats_percpu pointer",
+     "#if 0\t/* op13: 6.6's private memcg layout, not 6.18's (scripts/oplus_fix.py) */\n"
+     "/*\n * FIXME : memcg->vmstats_percpu pointer"),
+    ("hybridmain.c",
+     "\tunsigned long\t\ttargets[MEM_CGROUP_NTARGETS];\n} ____cacheline_aligned;\n",
+     "\tunsigned long\t\ttargets[MEM_CGROUP_NTARGETS];\n} ____cacheline_aligned;\n#endif\n"),
+    ("hybridmain.c",
+     "\tlong x = 0;\n\tint cpu;\n\n\tfor_each_possible_cpu(cpu)\n\t\tx += per_cpu(memcg->vmstats_percpu->state[idx], cpu);\n"
+     "#ifdef CONFIG_SMP\n\tif (x < 0)\n\t\tx = 0;\n#endif\n\treturn x;\n",
+     "\treturn memcg_page_state(memcg, idx);\t/* op13: exported in 6.18 */\n"),
+    ("hybridmain.c",
+     "struct hybridswapd_operations *hybridswapd_ops;\n",
+     "struct hybridswapd_operations *hybridswapd_ops;\n\n"
+     "/* op13: 6.18's android_vh_alloc_pages_slowpath_end, called where 6.6's _slowpath hook was */\n"
+     "static void k618_slowpath_end(void *data, gfp_t *gfp_mask, unsigned int order,\n"
+     "\t\tunsigned long alloc_start, u64 stime, unsigned long did_some_progress,\n"
+     "\t\tunsigned long pages_reclaimed, int retry_loop_count)\n{\n"
+     "\tif (hybridswapd_ops && hybridswapd_ops->vh_alloc_pages_slowpath)\n"
+     "\t\thybridswapd_ops->vh_alloc_pages_slowpath(data, *gfp_mask, order, alloc_start);\n}\n"),
+    ("hybridmain.c",
+     "register_trace_android_vh_alloc_pages_slowpath(hybridswapd_ops->vh_alloc_pages_slowpath, NULL)",
+     "register_trace_android_vh_alloc_pages_slowpath_end(k618_slowpath_end, NULL)"),
     ("oplus_uprobe.c",
      "static struct kprobe uprobe_unregister_kp = {\n\t.symbol_name = \"uprobe_unregister\"\n};",
      "static struct kprobe uprobe_unregister_kp = {\n\t.symbol_name = \"uprobe_unregister_nosync\"\n};"),

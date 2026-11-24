@@ -426,6 +426,28 @@ def fix(path):
 			text = insert_top_level(text, name, "#ifndef %s\n#define %s %s\t/* gone in 6.18 (vendor_fix618.py) */\n#endif\n"
 				% (name, name, val))
 			note(path, name)
+	# try_to_free_mem_cgroup_pages() takes a swappiness pointer since 6.12 (NULL: the memcg's own); a
+	# file's own extern copy of the old prototype goes (linux/swap.h has it)
+	if "try_to_free_mem_cgroup_pages" in text:
+		text2 = re.sub(r"^[ \t]*extern\s+unsigned\s+long\s+try_to_free_mem_cgroup_pages\s*\([^;]*\)\s*;[ \t]*\n", "",
+			text, flags=re.M)
+		out, i = [], 0
+		for m in re.finditer(r"\btry_to_free_mem_cgroup_pages\s*\(", text2):
+			j, depth, commas = m.end(), 1, 0
+			while j < len(text2) and depth:
+				c = text2[j]
+				depth += c == "("
+				depth -= c == ")"
+				commas += c == "," and depth == 1
+				j += 1
+			# a call with the old four arguments (a definition or a prototype has types: skipped)
+			if commas == 3 and not re.search(r"\bstruct\s+mem_cgroup\s*\*", text2[m.end():j]):
+				out.append(text2[i:j - 1] + ", NULL)")
+				i = j
+		text2 = "".join(out) + text2[i:]
+		if text2 != text:
+			note(path, "try_to_free_mem_cgroup_pages")
+			text = text2
 	# alarm callbacks return void (6.18: enum alarmtimer_restart is gone). Every OnePlus/Qualcomm one
 	# returns ALARMTIMER_NORESTART -- none re-arms through its return value
 	if "enum alarmtimer_restart" in text and "ALARMTIMER_RESTART;" not in text:
