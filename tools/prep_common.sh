@@ -174,6 +174,73 @@ if grep -q 'pr_info("%pfwf: Fixed dependency cycle(s) with %pfwf' $DC; then
 	echo "fw_devlink cycle note: debug"
 fi
 
+# A BPF program that fails to load: its name, type and error, and the end of the verifier's answer,
+# in the kernel log (pstore). Android's loaders log the answer only to logd, which a boot that never
+# finishes does not keep: test-43 stopped at the boot animation because OnePlus' oplus-netd.o did not
+# load (NetBpfLoad: "non-optional program failed to load") and netd waited for it for ever -- and
+# said nothing more. The first 16 failures get the verifier's text, the rest one line each.
+BS=$C/kernel/bpf/syscall.c
+if ! grep -q 'op13: failed program loads' $BS; then
+	python3 -I - "$BS" <<'PY'
+import sys
+p = sys.argv[1]
+t = open(p).read()
+old_case = "\tcase BPF_PROG_LOAD:\n\t\terr = bpf_prog_load(&attr, uattr, size);\n\t\tbreak;\n"
+old_fn = "static int __sys_bpf(enum bpf_cmd cmd, bpfptr_t uattr, unsigned int size)\n"
+assert t.count(old_case) == 1 and t.count(old_fn) == 1, "bpf report: anchors"
+fn = r'''/* op13: failed program loads, in the kernel log (tools/prep_common.sh) */
+static void op13_bpf_report(const union bpf_attr *attr, bpfptr_t uattr, int err)
+{
+	static atomic_t n_reported = ATOMIC_INIT(0);
+	const u32 chunk = 2048;
+	u32 size = attr->log_size, off = 0, keep = 0, len;
+	char *buf, *p, *line;
+
+	pr_warn("bpf: program '%.16s' (type %u, attach %u, %u insns) did not load: %d\n",
+		attr->prog_name, attr->prog_type, attr->expected_attach_type, attr->insn_cnt, err);
+	if (atomic_inc_return(&n_reported) > 16 || uattr.is_kernel || !attr->log_buf ||
+	    !attr->log_level || size < 2)
+		return;
+	buf = kmalloc(2 * chunk + 1, GFP_KERNEL);
+	if (!buf)
+		return;
+	/* walk the log to its end 2 KB at a time, keeping the last two chunks */
+	while (off < size) {
+		u32 n = min(chunk, size - off);
+
+		if (keep == 2 * chunk) {
+			memmove(buf, buf + chunk, chunk);
+			keep = chunk;
+		}
+		if (copy_from_user(buf + keep, u64_to_user_ptr(attr->log_buf + off), n))
+			break;
+		len = strnlen(buf + keep, n);
+		keep += len;
+		if (len < n)
+			break;
+		off += n;
+	}
+	buf[keep] = 0;
+	p = keep > 1536 ? strchrnul(buf + keep - 1536, '\n') : buf;
+	if (!keep)
+		pr_warn("bpf:   (the verifier said nothing)\n");
+	while ((line = strsep(&p, "\n")) != NULL)
+		if (*line)
+			pr_warn("bpf:   %s\n", line);
+	kfree(buf);
+}
+
+'''
+t = t.replace(old_fn, fn + old_fn)
+t = t.replace(old_case, "\tcase BPF_PROG_LOAD:\n\t\terr = bpf_prog_load(&attr, uattr, size);\n"
+              "\t\tif (err < 0)\n\t\t\top13_bpf_report(&attr, uattr, err);\t/* op13: failed program loads */\n"
+              "\t\tbreak;\n")
+open(p, "w").write(t)
+PY
+	grep -q 'op13: failed program loads' $BS || { echo "bpf load report: edit failed"; exit 1; }
+	echo "bpf load report added"
+fi
+
 # op13_deadline=<seconds>: a boot that has not started zygote by then logs where every blocked task
 # waits and every CPU's stack, for the ramoops log a Power+VolUp reset keeps. Once zygote has run,
 # it does nothing.

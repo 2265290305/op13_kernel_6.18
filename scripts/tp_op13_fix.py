@@ -37,14 +37,56 @@ EDITS = [
      "\t\t\tmemset(&scaler_v2, 0, sizeof(scaler_v2));\n"
      "\t\t\tif (copy_from_user(&scaler_v2, scaler_v2_usr,\n"
      "\t\t\t\t\toffsetof(struct sde_drm_scaler_v2, edge_bleed_sup_en))) {\n"),
+    # H2F_MSG_CONTEXT_POINTERS as the OnePlus 13's GMU firmware takes it: the SM8850 release appends
+    # dcvs_profile_addr (its GMU DCVS profiles, which sun's GPU does not use), the SM8750 one ends at
+    # gmu_context_queue_addr. test-43: the first GPU context surfaceflinger made got "HFI Error
+    # Received: 8 1345 HandleHfiCommand" back, then a GMU fault and a snapshot.
+    # The OnePlus 13's composer asks for the touch-down event as 0x80000014 (its sde_drm.h); the
+    # SM8850 release put VM_RECLAIM there and moved TP_TOUCHDOWN to 0x80000015. test-43: "failed to
+    # enable event 80000014". OnePlus 13's numbers.
+    ("display-drivers/include/uapi/display/drm/sde_drm.h",
+     "#define DRM_EVENT_VM_RECLAIM 0X80000014\n#ifdef OPLUS_FEATURE_DISPLAY\n"
+     "#define DRM_EVENT_TP_TOUCHDOWN 0x80000015 /* tp touch down event */\n",
+     "#define DRM_EVENT_VM_RECLAIM 0X80000015\t/* op13: TP_TOUCHDOWN's number in the 6.6 user space */\n"
+     "#ifdef OPLUS_FEATURE_DISPLAY\n#define DRM_EVENT_TP_TOUCHDOWN 0x80000014 /* tp touch down event */\n"),
+    # Colour-processing blobs from the 6.6 composer are shorter than the SM8850 structs: the demura
+    # config without cfg0_param_7/8 (8 bytes), the dither config without the extended matrix (1028).
+    # Take them zero-padded (the new fields' 0 is their default) instead of refusing them.
+    # test-43: "invalid blob len 8560 exp 8568 feature 38".
+    ("display-drivers/msm/sde/sde_color_processing.c",
+     "\tif (blob->length != prop_node->prop_blob_sz) {\n"
+     "\t\tDRM_ERROR(\"invalid blob len %zd exp %d feature %d\\n\",\n"
+     "\t\t    blob->length, prop_node->prop_blob_sz, prop_node->feature);\n",
+     "\t/* op13: the 6.6 composer's shorter demura (-8) and dither (-1028) configs, zero-padded */\n"
+     "\tif (blob->length < prop_node->prop_blob_sz &&\n"
+     "\t    (prop_node->prop_blob_sz - blob->length == 8 ||\n"
+     "\t     prop_node->prop_blob_sz - blob->length == 1028)) {\n"
+     "\t\tstruct drm_property_blob *nb = drm_property_create_blob(crtc->dev,\n"
+     "\t\t\t\t\tprop_node->prop_blob_sz, NULL);\n\n"
+     "\t\tif (!IS_ERR(nb)) {\n"
+     "\t\t\tmemcpy(nb->data, blob->data, blob->length);\n"
+     "\t\t\tdrm_property_blob_put(blob);\n"
+     "\t\t\tblob = nb;\n"
+     "\t\t}\n"
+     "\t}\n"
+     "\tif (blob->length != prop_node->prop_blob_sz) {\n"
+     "\t\tDRM_ERROR(\"invalid blob len %zd exp %d feature %d\\n\",\n"
+     "\t\t    blob->length, prop_node->prop_blob_sz, prop_node->feature);\n"),
+    ("graphics-kernel/adreno_hfi.h",
+     "\tu32 gmu_context_queue_addr;\n\tu32 dcvs_profile_addr;\n} __packed;",
+     "\tu32 gmu_context_queue_addr;\n\t/* op13: no dcvs_profile_addr (SM8750 GMU firmware) */\n} __packed;"),
+    ("graphics-kernel/adreno_gen8_hwsched_hfi.c",
+     "\tcmd.version = 1;\n\tcmd.dcvs_profile_addr = GMU_BUF_ADDR(md);\n",
+     "\tcmd.version = 1;\n\t(void)md;\t/* op13: no dcvs_profile_addr (SM8750 GMU firmware) */\n"),
 ]
 
 
 def gpu_as_op13(root):
     """The OnePlus 13's GPU (Adreno 830: gen8_0_1, Sun v2's DT; gen8_0_0 for v1) as the OnePlus 13's
-    own KGSL sets it up: without the GMU thermal mitigation, the thermal profile, the CLX table and
-    the no-fault-tolerance timeout the SM8850 release sends its GMU (OnePlus took them out for SM8750:
-    "bug:8274887"). test-40: the phone's GMU firmware answered the boot handshake with HFI error 115
+    own KGSL sets it up: without the GMU thermal mitigation, the thermal profile and the
+    no-fault-tolerance timeout the SM8850 release sends its GMU (OnePlus took them out for SM8750:
+    "bug:8274887"). The CLX table stays: OnePlus' SM8750 KGSL sends the same one, built in code
+    (without it the SM8850 KGSL turns CLX off). test-40: the phone's GMU firmware answered the boot handshake with HFI error 115
     (ResMgrCalibrate) and stopped acking, the GPU never came up, surfaceflinger kept dying."""
     path = os.path.join(root, "graphics-kernel/adreno-gpulist.h")
     if not os.path.exists(path):
@@ -56,7 +98,7 @@ def gpu_as_op13(root):
         nonlocal n
         b = m.group(0)
         b2 = b.replace("ADRENO_ACD | ADRENO_CLX | ADRENO_GMU_THERMAL_MITIGATION,", "ADRENO_ACD | ADRENO_CLX,")
-        b2 = re.sub(r"\n\t\.(cl_no_ft_timeout_ms|therm_profile|clx_tbl) = [^\n]*,", "", b2)
+        b2 = re.sub(r"\n\t\.(cl_no_ft_timeout_ms|therm_profile) =[^\n]*,", "", b2)
         if b2 != b:
             n += 1
         return b2

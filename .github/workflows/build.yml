@@ -31,7 +31,7 @@ jobs:
       - name: Host packages
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq bc bison flex libssl-dev libelf-dev cpio lz4 zstd ccache kmod python3 \
+          sudo apt-get install -y -qq bc bison flex libssl-dev libelf-dev dwarves cpio lz4 zstd ccache kmod python3 \
             clang-19 lld-19 llvm-19
           /usr/lib/llvm-19/bin/clang --version | head -1
 
