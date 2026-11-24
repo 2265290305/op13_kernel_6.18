@@ -92,9 +92,18 @@ def header_includes(label, seen):
 todo, order, state = {}, [], {}
 
 
+planned = set()		# output names in the plan: one module of a name, however many packages define it
+
+
 def need(m):
 	key = "%s:%s" % (m["package"], m["name"])
 	if state.get(key) == 2:
+		return
+	if norm(m["out"]) in planned:
+		# another package's module of the same name (oplus_audio_netlink: OnePlus' audio package
+		# and Qualcomm's audio-kernel both define it) is in the plan already: building both had
+		# modpost see every export twice
+		state[key] = 2
 		return
 	if state.get(key) == 1:
 		print("vendor_kbuild: dependency loop at %s" % key)
@@ -104,6 +113,7 @@ def need(m):
 		if dep in by_label and norm(by_label[dep]["out"]) not in have:
 			need(by_label[dep])
 	state[key] = 2
+	planned.add(norm(m["out"]))
 	order.append(m)
 
 

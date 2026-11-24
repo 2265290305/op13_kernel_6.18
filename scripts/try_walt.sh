@@ -32,7 +32,7 @@ COPTS="-DCONFIG_OPLUS_FEATURE_SCHED_ASSIST -DCONFIG_OPLUS_SCHED_HALT_MASK_PRT -D
 	echo "ccflags-y += -I\$(src) -DCONFIG_SCHED_WALT_MODULE=1 $COPTS"
 } > "$W/walt/Kbuild"
 "${KMAKE[@]}" M="$W/walt" modules -j"$J" KBUILD_EXTRA_SYMBOLS="$SYMS" \
-	NOSTDINC_FLAGS="-nostdinc -I$S/include -I$W/inc -idirafter $C" KCFLAGS="-Wno-error -include $CONF" \
+	NOSTDINC_FLAGS="-nostdinc -I$S/include -I$W/inc -I$ROOT/src/mods8850/vendor/oplus/kernel/cpu/sched -I$ROOT/src/mods8850/vendor/oplus/kernel/cpu -idirafter $C" KCFLAGS="-Wno-error -include $CONF" \
 	> "$W/sched-walt.log" 2>&1
 echo "try_walt: sched-walt: make exit $?, $(grep -c ': error: ' "$W/sched-walt.log") errors"
 grep -E ': (fatal )?error: |^ERROR: modpost' "$W/sched-walt.log" | sed -E "s|$W/||" | sort -u | head -40
@@ -45,7 +45,7 @@ if [ -f "$ROOT/src/msm8750/kernel/sched/walt/penalty.c" ]; then
 		echo "ccflags-y += -I\$(src) -DCONFIG_SCHED_WALT_MODULE=1 $COPTS"
 	} > "$W/walt/Kbuild"
 	"${KMAKE[@]}" M="$W/walt" modules -j"$J" KBUILD_EXTRA_SYMBOLS="$SYMS $W/walt/Module.symvers" \
-		NOSTDINC_FLAGS="-nostdinc -I$S/include -I$W/inc -idirafter $C" KCFLAGS="-Wno-error -include $CONF" \
+		NOSTDINC_FLAGS="-nostdinc -I$S/include -I$W/inc -I$ROOT/src/mods8850/vendor/oplus/kernel/cpu/sched -I$ROOT/src/mods8850/vendor/oplus/kernel/cpu -idirafter $C" KCFLAGS="-Wno-error -include $CONF" \
 		> "$W/sched-penalty.log" 2>&1
 	echo "try_walt: sched-penalty: make exit $?"
 	grep -E ': (fatal )?error: |^ERROR: modpost' "$W/sched-penalty.log" | sed -E "s|$W/||" | sort -u | head -20

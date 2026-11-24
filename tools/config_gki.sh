@@ -12,7 +12,9 @@ $M gki_defconfig > "$O/../gki-config.log" 2>&1
 KNAME=-palaziks.ShiftPorts
 GKI_MODS="MTD MTD_BLKDEVS MTD_BLOCK MTD_OOPS MTD_BLOCK2MTD MTD_OF_PARTS QCOM_PMIC_GLINK
 	  UCSI_PMIC_GLINK USB_EHSET_TEST_FIXTURE IR_SPI IIO_BUFFER_CB
-	  TLS PTP_1588_CLOCK_KVM DRM_LONTIUM_LT9611UXC"
+	  TLS PTP_1588_CLOCK_KVM DRM_LONTIUM_LT9611UXC COMMON_CLK_SCMI"
+# (clk-scmi: the kernel's own, stock loads it from vendor_dlkm and coresight's atclk is an SCMI
+# clock -- the SoC repo's copy does not build for 6.18, without it coresight defers for ever, test-40)
 # (atmel_mxt_ts and goodix_ts: the phone's are Qualcomm's touch-drivers techpack ones, build_vendor.sh)
 # and the ones only a selector reaches: snd-soc-hdmi-codec (the LT9611UXC bridge above) -- y or m.
 # Not usb_f_rndis: with the gadget configfs built in it can only be built in too, and Qualcomm's

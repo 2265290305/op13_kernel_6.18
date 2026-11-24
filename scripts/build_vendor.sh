@@ -52,17 +52,17 @@ mkdir -p "$W/inc8750"
 [ -d "$ROOT/src/msm8750/include/dt-bindings" ] && ln -sfn "$ROOT/src/msm8750/include/dt-bindings" "$W/inc8750/dt-bindings"
 ok=0; bad=0
 
-# prepare <pass dir> <modules source>: the build copy of one source tree, its module definitions
+# prepare <pass dir> <modules source> [kernel version it is written for, 6.6]: the build copy of one source tree, its module definitions
 # (<pass dir>/modules.json), its fixes and the include directory its OnePlus headers are reached by
 prepare() {
-	local P=$1 SRC=$2 T=$1/tree r d h p
+	local P=$1 SRC=$2 KV=${3:-6.6} T=$1/tree r d h p
 	mkdir -p "$T/vendor/qcom/opensource" "$P/inc/soc/oplus" "$P/inc/linux"
 	QREPOS=$(cd "$SRC/vendor/qcom/opensource" && ls -d -- */ | tr -d / | grep -v -- '-devicetree$' | tr '\n' ' ')
 	cp -r "$SRC/vendor/oplus" "$T/vendor/oplus"
 	for d in st nxp; do [ -d "$SRC/vendor/$d" ] && cp -r "$SRC/vendor/$d" "$T/vendor/"; done
 	for r in $QREPOS; do cp -r "$SRC/vendor/qcom/opensource/$r" "$T/vendor/qcom/opensource/"; done
 	# the definitions, read before the copy's fixes; OnePlus' macro file from that tree's kernel_platform
-	BZL_MACROS=$SRC/kernel_platform/oplus/bazel python3 -I "$ROOT/scripts/bzl_eval.py" "$T" "$P/modules.json" \
+	BZL_KVER=$KV BZL_MACROS=$SRC/kernel_platform/oplus/bazel python3 -I "$ROOT/scripts/bzl_eval.py" "$T" "$P/modules.json" \
 		vendor/oplus $(for r in $QREPOS; do echo "vendor/qcom/opensource/$r"; done)
 	for d in "$T"/vendor/* "$T"/msm8750; do
 		[ -d "$d" ] || continue
@@ -282,7 +282,7 @@ n=$(still_wanted "$W/wanted2.txt")
 echo "build_vendor: pass 1 built $ok; $n still wanted, from the OnePlus 15's 6.12 tree" | tee -a "$LOG/summary.txt"
 if [ "$n" -gt 0 ]; then
 	P2=$W/op15
-	prepare "$P2" "$ROOT/src/mods8850"
+	prepare "$P2" "$ROOT/src/mods8850" 6.12
 	build "$P2" "$W/wanted2.txt" vendor/oplus vendor/qcom/opensource
 fi
 

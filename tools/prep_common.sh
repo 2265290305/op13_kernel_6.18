@@ -118,6 +118,62 @@ EOF
 	echo "op13_ramoops= reservation added"
 fi
 
+# ramoops.console_pin=<bytes>: the console zone's first <bytes> are kept, the rest is the ring. With
+# nothing filtered, the 256 KB the stock layout gives the console held only the last ~80 s and lost
+# the boot's start (test-40's log began at 2.35 s). Once the zone is full, a write wraps to <bytes>
+# instead of 0: the boot's start stays, the end keeps coming. The zone's header is the stock one, so
+# the stock kernel shows it as before -- ring (older part), the pinned start, ring (newest part).
+RC=$C/fs/pstore/ram_core.c
+RI=$C/fs/pstore/ram_internal.h
+if ! grep -q 'op13: pinned start' $RC; then
+	python3 -I - "$RC" "$RI" "$RO" <<'PY'
+import sys
+rc, ri, ro = sys.argv[1:4]
+def edit(path, old, new, n=1):
+	t = open(path).read()
+	assert t.count(old) == n, (path, old, t.count(old))
+	open(path, "w").write(t.replace(old, new))
+edit(ri, "\tchar *old_log;\n\tsize_t old_log_size;\n};",
+     "\tchar *old_log;\n\tsize_t old_log_size;\n\tsize_t pin;\t/* op13: pinned start (tools/prep_common.sh) */\n};")
+# the ring wraps to the pinned start, not to 0
+edit(rc, "\twhile (unlikely(new >= prz->buffer_size))\n\t\tnew -= prz->buffer_size;\n\tatomic_set(&prz->buffer->start, new);",
+     "\twhile (unlikely(new >= prz->buffer_size))\n\t\tnew -= prz->buffer_size - prz->pin;\t/* op13: pinned start */\n"
+     "\tatomic_set(&prz->buffer->start, new);")
+edit(rc, "\tif (unlikely(c > prz->buffer_size)) {\n\t\ts += c - prz->buffer_size;\n\t\tc = prz->buffer_size;\n\t}\n\n\tbuffer_size_add(prz, c);",
+     "\tif (unlikely(c > prz->buffer_size - prz->pin)) {\n\t\ts += c - (prz->buffer_size - prz->pin);\n"
+     "\t\tc = prz->buffer_size - prz->pin;\n\t}\n\n\tbuffer_size_add(prz, c);", 2)	# write and write_user
+edit(rc, "\t\ts += rem;\n\t\tc -= rem;\n\t\tstart = 0;\n\t}\n\tpersistent_ram_update(prz, s, start, c);\n\n\tpersistent_ram_update_header_ecc(prz);",
+     "\t\ts += rem;\n\t\tc -= rem;\n\t\tstart = prz->pin;\n\t}\n\tpersistent_ram_update(prz, s, start, c);\n\n\tpersistent_ram_update_header_ecc(prz);")
+edit(rc, "\t\ts += rem;\n\t\tc -= rem;\n\t\tstart = 0;\n\t}\n\tif (likely(!ret))",
+     "\t\ts += rem;\n\t\tc -= rem;\n\t\tstart = prz->pin;\n\t}\n\tif (likely(!ret))")
+# the parameter, for the console zone only
+edit(ro, "MODULE_PARM_DESC(console_size, \"size of kernel console log\");\n",
+     "MODULE_PARM_DESC(console_size, \"size of kernel console log\");\n\n"
+     "/* op13: see tools/prep_common.sh */\nstatic ulong op13_console_pin;\n"
+     "module_param_named(console_pin, op13_console_pin, ulong, 0400);\n"
+     "MODULE_PARM_DESC(console_pin, \"bytes at the console zone's start a full ring does not overwrite\");\n")
+edit(ro, "\terr = ramoops_init_prz(\"console\", dev, cxt, &cxt->cprz, &paddr,\n\t\t\t       cxt->console_size, 0);\n\tif (err)\n\t\tgoto fail_init;\n",
+     "\terr = ramoops_init_prz(\"console\", dev, cxt, &cxt->cprz, &paddr,\n\t\t\t       cxt->console_size, 0);\n\tif (err)\n\t\tgoto fail_init;\n"
+     "\tif (cxt->cprz && op13_console_pin &&\n"
+     "\t    op13_console_pin + 4096 <= cxt->cprz->buffer_size) {\t/* op13: pinned start */\n"
+     "\t\tcxt->cprz->pin = op13_console_pin;\n"
+     "\t\tpr_info(\"op13: console zone: first %lu bytes kept\\n\", op13_console_pin);\n\t}\n")
+PY
+	grep -q 'op13: pinned start' $RC && grep -q 'size_t pin;' $RI && grep -q 'console_pin' $RO \
+		|| { echo "pstore pinned start: edit failed"; exit 1; }
+	echo "ramoops.console_pin= added"
+fi
+
+# fw_devlink's "Fixed dependency cycle(s) with ..." -- 779 lines, 73 KB of the first 0.74 s on this
+# phone's DT (test-31), a note on the DT's structure, the same every boot, which the stock log level
+# (6) hides anyway: a debug message, so the console zone holds the boot (ramoops.console_pin above)
+DC=$C/drivers/base/core.c
+if grep -q 'pr_info("%pfwf: Fixed dependency cycle(s) with %pfwf' $DC; then
+	sed -i 's|pr_info("%pfwf: Fixed dependency cycle(s) with %pfwf|pr_debug("%pfwf: Fixed dependency cycle(s) with %pfwf|' $DC
+	grep -q 'pr_debug("%pfwf: Fixed dependency cycle(s)' $DC || { echo "fw_devlink cycle note: edit failed"; exit 1; }
+	echo "fw_devlink cycle note: debug"
+fi
+
 # op13_deadline=<seconds>: a boot that has not started zygote by then logs where every blocked task
 # waits and every CPU's stack, for the ramoops log a Power+VolUp reset keeps. Once zygote has run,
 # it does nothing.

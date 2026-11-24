@@ -28,7 +28,10 @@ ROOT = os.path.abspath(sys.argv[1])
 OUT = sys.argv[2]
 PKGS = sys.argv[3:]
 # the configuration these files are evaluated for: sun, perf, OnePlus' 6.6 kernel
-TARGET, VARIANT, KVER = "sun", "perf", "6.6"
+TARGET, VARIANT = "sun", "perf"
+# the kernel version the tree is written for (OnePlus' files choose code paths by it): 6.6 for the
+# OnePlus 13's tree, 6.12 for the OnePlus 15's (BZL_KVER)
+KVER = os.environ.get("BZL_KVER", "6.6")
 MACROS = os.environ.get("BZL_MACROS") or os.path.join(ROOT, "kernel_platform/oplus/bazel")
 # the kernel options conditional_srcs and select() test: the stock 6.6 configuration plus each
 # module's own defconfig (applied when the module is recorded)
@@ -286,6 +289,10 @@ def shim_modules():
 		"//build/kernel/kleaf:hermetic_tools.bzl": {"hermetic_genrule": noop, "hermetic_exec": noop},
 		"//build/kernel/oplus:oplus_modules_dist.bzl": {"ddk_copy_to_dist_dir": noop},
 		"//msm-kernel:target_variants.bzl": {"get_all_la_variants": lambda: [(TARGET, VARIANT)],
+			"get_all_variants": lambda: [(TARGET, VARIANT)],
+			"la_variants": [VARIANT], "la_targets": [TARGET]},
+		# the 6.12 trees name it after the SoC repo
+		"//soc-repo:target_variants.bzl": {"get_all_la_variants": lambda: [(TARGET, VARIANT)],
 			"get_all_variants": lambda: [(TARGET, VARIANT)],
 			"la_variants": [VARIANT], "la_targets": [TARGET]},
 		"//build/bazel_common_rules/dist:dist.bzl": {"copy_to_dist_dir": noop},

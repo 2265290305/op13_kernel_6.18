@@ -31,6 +31,11 @@ RAMOOPS="op13_ramoops=0x240000@0x880000000 ramoops.mem_address=0x880000000 ramoo
 # its plain reset keeps the RAM (the log survived it). loglevel=7: the bootloader passes loglevel=6,
 # which keeps KERN_INFO -- most of the log -- off the consoles, ramoops' among them.
 RAMOOPS="$RAMOOPS loglevel=7"
+# ramoops.console_pin: the console zone's first 96 KB keep the boot's start (the kernel's own ~37 KB,
+# the first stage, the batch's start) and the other 160 KB are the ring with the end -- with nothing
+# filtered, 256 KB of ring alone held the last ~80 s only (test-40's log began at 2.35 s).
+# tools/prep_common.sh; the stock kernel shows the zone as ring (older), start, ring (newest)
+RAMOOPS="$RAMOOPS ramoops.console_pin=98304"
 # No sysctl.kernel.printk=1 (the reference has it): applied just before init runs (~0.74 s), it took
 # the console level to 1 and left only KERN_EMERG -- k618_load and oopses -- in the pstore log from
 # then on (test-15 to test-31: every driver and init message after 0.74 s was missing)
@@ -56,9 +61,10 @@ CMDLINE=${CMDLINE:-op13_modload_tolerate=1 op13_deadline=180 op13_hold_reboot=1 
 rm -rf "$B" && mkdir -p "$T/rd/lib/modules" "$T/mods/lib/modules/$REL/kernel" "$B/helpers"
 
 # the batch loader (a module) and its helper (a static program: the first-stage ramdisk has no libc)
-# (k618_probe: the reference's log writer, first in both images' first stage -- see below)
-cp "$ROOT/modules/k618_load.c" "$ROOT/modules/k618_probe.c" "$B/helpers/"
-echo "obj-m += k618_load.o k618_probe.o" > "$B/helpers/Kbuild"
+# (not the reference's k618_probe, which writes the log onto the rawdump partition: no image writes
+# a partition of this phone -- pstore's console holds the log)
+cp "$ROOT/modules/k618_load.c" "$B/helpers/"
+echo "obj-m += k618_load.o" > "$B/helpers/Kbuild"
 "${KMAKE[@]}" M="$B/helpers" modules > "$B/helpers/build.log" 2>&1 || { tail -20 "$B/helpers/build.log"; exit 1; }
 clang --target=aarch64-linux-gnu -O2 -nostdlib -static -ffreestanding -fno-stack-protector \
 	-fuse-ld=lld -Wl,--build-id=none -s -o "$T/rd/k618_umh" "$ROOT/modules/k618_umh.c"
@@ -149,33 +155,6 @@ done
 cp -a "$T/rd" "$T/rd-full"
 mkdir -p "$B/full"
 python3 -I "$ROOT/scripts/mklists.py" "$T/rd-full/lib/modules" "$ST" "$B/full" "$NEW"
-
-# Both images: the reference's log writer (k618_probe) first in the first stage. It writes the
-# kernel log onto the partition named rawdump -- only one whose partition-table name is that -- every
-# 2 s, before every module of the batch (k618_load calls its flush) and from the panic notifier: two
-# whole copies in turns and a 16 MB ring, 28 MB from the partition's start, which a write cannot
-# leave. The whole log from 0 s: pstore's console (256 KB, the stock kernel's layout) keeps only its
-# last ~80 s now that nothing is filtered (test-40's began at 2.35 s). Read back on the stock kernel:
-# dd if=/dev/block/by-name/rawdump bs=1M count=28 (ref_8550/kernel-6.18/k618_rdread.py).
-# (boot-rawlog.img, the image that had it alone, is no more.)
-add_logwriter() {
-	python3 -I - "$1/lib/modules" <<'PY'
-import sys
-d = sys.argv[1]
-load = open(f"{d}/modules.load").read().split()
-assert "k618_probe.ko" not in load and load[-1] == "k618_load.ko"
-open(f"{d}/modules.load", "w").write("".join(m + "\n" for m in ["k618_probe.ko"] + load))
-sd = open(f"{d}/modules.softdep").read()
-assert "softdep k618_load pre: " in sd
-open(f"{d}/modules.softdep", "w").write(sd.replace("softdep k618_load pre: ", "softdep k618_load pre: k618_probe ", 1))
-open(f"{d}/modules.options", "a").write(
-    "options k618_probe probe_ms=0 log_part=rawdump log_from=metadata log_start_ms=300 "
-    "log_poll_ms=20 log_every_ms=2000 log_slot_kb=4096 log_buf_kb=4096 "
-    "log_ring_kb=16384 log_ring_ms=20 log_ring_keep_kb=4096 log_stall_ms=5000\n")
-PY
-}
-add_logwriter "$T/rd"
-add_logwriter "$T/rd-full"
 
 # the layer, built into the kernel: INITRAMFS_SOURCE set and the Image relinked (INITRAMFS_FORCE
 # stays off, or the phone's own ramdisks would not be unpacked at all)

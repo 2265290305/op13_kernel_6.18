@@ -160,8 +160,11 @@ static void load_one(const char *name, unsigned int n, unsigned int total)
 	/* a wait status: (exit code << 8) | the signal that killed it; or < 0, nothing ran */
 	if (ret == 0) {
 		n_loaded++;
-		pr_emerg("k618_load: %u/%u %s: loaded (%llu ms)%s%s\n", n, total, name, now_ms() - t0,
-			 args ? " with " : "", args ?: "");
+		/* op13: a quick load says nothing more -- its "trying" line is there, and the next one
+		 * shows it went in; the log has to fit pstore's console (scripts/build_bootimg.sh) */
+		if (now_ms() - t0 >= 100)
+			pr_emerg("k618_load: %u/%u %s: loaded (%llu ms)%s%s\n", n, total, name, now_ms() - t0,
+				 args ? " with " : "", args ?: "");
 	} else if (ret > 0 && (ret & 0x7f)) {
 		/* killed by a signal: its init() faulted (SIGSEGV 11, SIGBUS 7, SIGILL 4...) and the
 		 * oops took the child, not us -- which is the whole point of loading it this way */
