@@ -215,6 +215,11 @@ EDITS = [
     ("sa_balance.c",
      "static void attach_one_task(struct rq *rq, struct task_struct *p)\n{\n",
      "static void __maybe_unused k618_fair_attach_one_task(struct rq *rq, struct task_struct *p)\n{\n"),
+    # Wi-Fi (qcacld sme_api.c, OnePlus' extended latency levels): its two ini items are missing from
+    # struct cfg_values in this build ("no member named '__CFG_LATENCY_FLAGS_LOW_EXT_internal'"):
+    # their defaults (cfg_mlme_fe_wlm.h's CFG_DEFAULT_*_EXT_FLAGS) instead of the ini lookup
+    ("sme_api.c", "cfg_get(mac->psoc, CFG_LATENCY_FLAGS_LOW_EXT)", "\"0x184c03\" /* op13 */"),
+    ("sme_api.c", "cfg_get(mac->psoc, CFG_LATENCY_FLAGS_ULTLOW_EXT)", "\"0x180c03\" /* op13 */"),
 ]
 
 
