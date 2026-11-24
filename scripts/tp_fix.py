@@ -55,8 +55,30 @@ def main(argv):
                 if old in text:
                     open(p, "w", encoding="utf-8", errors="surrogateescape", newline="").write(text.replace(old, new))
                     swept += 1
-    for rel, old, new in ns["EDITS"]:
-        if rel.split("/")[0] in SKIP_REPOS or rel in SKIP_FILES or DEVICE.search(rel + old + new):
+    # the device edits, and with them every edit using a k618_ name only a device edit defines (the
+    # Xiaomi Wi-Fi file names: the regdb edit names k618_regdb_name, which the skipped Xiaomi block
+    # defines -- applied alone, cnss2 did not build)
+    def device(rel, old, new):
+        return rel.split("/")[0] in SKIP_REPOS or rel in SKIP_FILES or DEVICE.search(rel + old + new)
+    DEF = re.compile(r"^[ \t]*(?:(?:static|const|unsigned|signed|struct\s+\w+|enum\s+\w+|\w+_t|char|int|long|"
+                     r"bool|void|u8|u16|u32|u64)\s+\**)+(k618_\w+)\s*[=;(\[]", re.M)
+    use = lambda s: set(re.findall(r"\bk618_\w+", s))
+    dev = {i for i, e in enumerate(ns["EDITS"]) if device(*e)}
+    while True:
+        names = set()
+        for i in dev:
+            _rel, old, new = ns["EDITS"][i]
+            names |= set(DEF.findall(new)) - set(DEF.findall(old))
+        for i, (_rel, old, new) in enumerate(ns["EDITS"]):
+            if i not in dev:
+                names -= set(DEF.findall(new))
+        more = {i for i, (_rel, old, new) in enumerate(ns["EDITS"])
+                if i not in dev and (use(new) - use(old)) & names}
+        if not more:
+            break
+        dev |= more
+    for i, (rel, old, new) in enumerate(ns["EDITS"]):
+        if i in dev:
             skipped += 1
             continue
         path = os.path.join(root, rel)
