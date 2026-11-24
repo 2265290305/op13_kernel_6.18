@@ -642,6 +642,14 @@ def fix(path):
 		if text2 != text:
 			note(path, "__exit remove")
 			text = text2
+	# device_find_child()'s match callback takes const data (device_match_t, 6.13+): the charger's
+	# dev_is_pm8550b and the like
+	for name in set(re.findall(r"\bdevice_find_child\(\s*[^,()]+,\s*[^,()]+,\s*(\w+)\s*\)", text)):
+		text2 = re.sub(r"(\bint\s+%s\s*\(\s*struct\s+device\s*\*\s*\w+\s*,\s*)void\s*\*" % re.escape(name),
+			r"\1const void *", text)
+		if text2 != text:
+			note(path, "device_find_child match")
+			text = text2
 	# page_mapcount() is gone (6.15): a page's folio's mapcount
 	text2 = re.sub(r"\bpage_mapcount\(\s*(\w+)\s*\)", r"folio_mapcount(page_folio(\1))", text)
 	if text2 != text:
