@@ -615,6 +615,41 @@ PY
 	echo "of_match_bus: nodes without #address-cells inherit their parents' cells again"
 fi
 
+# A NAPI context that was never added (napi->dev NULL) is deleted or disabled as in 6.6: nothing to
+# do. 6.18 takes the device's instance lock first (netdev_lock(napi->dev)), so the same call is a
+# NULL dereference. IPA deletes the TX NAPI of every producer pipe it tears down, added or not: the
+# modem's shutdown at `adb reboot` (ipa3_wwan_remove -> ipa_teardown_sys_pipe -> netif_napi_del)
+# oopsed on dev->lock at 0xa70 and froze the phone (log21).
+ND=$C/include/linux/netdevice.h
+DV=$C/net/core/dev.c
+if ! grep -q 'op13: a NAPI never added' $ND; then
+	python3 -I - "$ND" "$DV" <<'PY'
+import sys
+nd, dv = sys.argv[1], sys.argv[2]
+t = open(nd).read()
+old = ("static inline void __netif_napi_del(struct napi_struct *napi)\n{\n"
+       "\tnetdev_lock(napi->dev);\n")
+new = ("static inline void __netif_napi_del(struct napi_struct *napi)\n{\n"
+       "\tif (unlikely(!napi->dev))\t/* op13: a NAPI never added, as in 6.6 (tools/prep_common.sh) */\n"
+       "\t\treturn;\n"
+       "\tnetdev_lock(napi->dev);\n")
+assert t.count(old) == 1, "__netif_napi_del"
+open(nd, "w").write(t.replace(old, new, 1))
+t = open(dv).read()
+old = ("void napi_disable(struct napi_struct *n)\n{\n"
+       "\tnetdev_lock(n->dev);\n")
+new = ("void napi_disable(struct napi_struct *n)\n{\n"
+       "\tif (unlikely(!n->dev))\t/* op13: a NAPI never added, as in 6.6 (tools/prep_common.sh) */\n"
+       "\t\treturn;\n"
+       "\tnetdev_lock(n->dev);\n")
+assert t.count(old) == 1, "napi_disable"
+open(dv, "w").write(t.replace(old, new, 1))
+PY
+	grep -q 'op13: a NAPI never added' $ND && grep -q 'op13: a NAPI never added' $DV \
+		|| { echo "napi never added: edit failed"; exit 1; }
+	echo "napi: a NAPI never added is deleted/disabled as in 6.6"
+fi
+
 # a 4096-byte command line: the bootloader appends its own (msm_drm.dsi_display0=<panel>,
 # oplus_bsp_tp_custom.dsi_display0=<panel> ...) after the boot image's, and with ours the whole was
 # cut at 2048 (test-46: 2045 bytes kept, oplus_bsp_tp_custom.dsi_display0 gone -- the touch driver
