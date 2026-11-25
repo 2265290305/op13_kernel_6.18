@@ -16,6 +16,31 @@ python3 -I "$ROOT/scripts/vendor_fix618.py" "$W/walt"
 sed -i -E "s#(define[[:space:]]+TRACE_INCLUDE_PATH[[:space:]]+)\.[^[:space:]]*#\1$W/walt#" "$W"/walt/*.h
 # 6.18's pick_task() takes the rq_flags too (trial only: WALT's halt path has none to give)
 sed -i -E 's/\bpick_task\(\s*(\w+)\s*\)/pick_task(\1, NULL)/g' "$W"/walt/*.c
+# 6.18: struct binder_transaction has no need_reply (a transaction that waits for a reply is one
+# neither one-way nor a reply); android_vh_binder_restore_priority passes the transaction alone,
+# from the thread that replies (6.12 passed it as `current`); set_next_entity() is declared by
+# kernel/sched/sched.h (with 6.18's `first`), WALT's own stale declaration -- it never calls it
+python3 -I - "$W/walt/walt_cfs.c" <<'PY'
+import sys
+p = sys.argv[1]
+t = open(p).read()
+edits = [
+	("bndrtrans && bndrtrans->need_reply && ",
+	 "bndrtrans && !bndrtrans->is_async && !bndrtrans->is_reply && "),
+	("static void binder_restore_priority_hook(void *data,\n"
+	 "\t\t\t\tstruct binder_transaction *bndrtrans, struct task_struct *task)\n{\n",
+	 "static void binder_restore_priority_hook(void *data,\n"
+	 "\t\t\t\tstruct binder_transaction *bndrtrans)\n{\n"
+	 "\tstruct task_struct *task = current;\n"),
+	("extern void set_next_entity(struct cfs_rq *cfs_rq, struct sched_entity *se);\n", ""),
+]
+for old, new in edits:
+	if old not in t:
+		print("try_walt: walt_cfs.c: text to change not found: %r" % old[:60])
+		continue
+	t = t.replace(old, new, 1)
+open(p, "w").write(t)
+PY
 CONF=$W/soc-autoconf.h
 soc_autoconf "$CONF"
 OMRG=$(find "$ROOT/out/vendor" -path '*cpu/oplus_omrg/oplus_omrg.h' 2>/dev/null | head -1)
