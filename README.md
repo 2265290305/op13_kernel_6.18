@@ -2,30 +2,41 @@
 
 An Android common kernel **6.18** port for the **OnePlus 13** (Snapdragon 8 Elite, **SM8750** / `sun`), with the vendor modules rebuilt for 6.18.
 
-> **Status: bring-up.** The kernel boots to Android's first-stage init; the full image does not reach Android yet (being debugged from its boot log). Only test with `fastboot boot` (see below); nothing here flashes your phone.
+> **Status: boots to ColorOS** (test-56, 2026-11-25: the first 6.18 kernel to do so on the OnePlus 13). Still a test kernel: only run it with `fastboot boot` (see below); nothing here flashes your phone.
 
 | | |
 |:--|:--|
 | Device | OnePlus 13, SM8750 |
 | Target ROM | ColorOS 16.0.10 CN (stock kernel `6.6.118-android15-8`) |
-| Kernel | ACK `android17-6.18` at 6.18.32 (`ff4a6c3b`) |
-| Builds | [GitHub Actions](../../actions) — kernel `Image` and modules as artifacts |
+| Kernel | ACK `android17-6.18` at 6.18.32 (`ff4a6c3b`), built with LLVM 22 |
+| Builds | [GitHub Actions](../../actions); test images on [Releases](../../releases) |
+
+## What works
+
+| | |
+|:--|:--|
+| Works | Boot to ColorOS, display and touch, GPU, adb, Wi-Fi, fingerprint (FOD) |
+| Partly | Brightness (set from settings; kept across screen-on/AOD transitions from test-58), the display sometimes stops updating |
+| Not yet | Camera (and with it face unlock and the flashlight), root (KernelSU goes into the kernel once it is stable) |
+| Not built | WALT and what needs it, OnePlus' zsmalloc fork (hybridswap, zram tuning), GEAS, and modules OnePlus has not published |
+
+Each release's notes say what changed and what is known to be broken.
 
 ## How it works
 
-A 6.6 kernel's vendor modules cannot load on 6.18, so the port is mostly about the modules:
+A 6.6 kernel's vendor modules cannot load on 6.18, so the port is mostly about the modules (706 of them, every versioned import checked against its provider at build time):
 
-1. **Kernel** — Google's ACK 6.18 with a small set of edits the vendor drivers need ([`tools/prep_common.sh`](tools/prep_common.sh)) and `gki_defconfig` plus a few options ([`tools/config_gki.sh`](tools/config_gki.sh)).
-2. **SoC drivers** — clocks, pinctrl, interconnects, RPMh, SMMU, UFS, USB, … from OnePlus' SM8850 (OnePlus 15) kernel tree, which already carries the SM8750 `sun` target. The 6.12 → 6.18 adaptation comes from the Xiaomi 13 port (see credits); the build uses the `sun_perf` config ([`scripts/build_soc.sh`](scripts/build_soc.sh), [`configs/op13_overrides.bzl`](configs/op13_overrides.bzl)).
-3. **Multimedia / connectivity drivers** — Qualcomm techpack repos built for `sun` ([`scripts/build_tp.sh`](scripts/build_tp.sh)): secure world (smcinvoke, qseecom, …), synx, fences, MMRM, DSP (fastrpc), display (`msm_drm`) and GPU (`msm_kgsl`). Only the reference port's generic 6.18 fixes are applied — not its adaptations to Xiaomi's 5.15-era user space: the OnePlus 13's user space speaks the 6.12 release's interfaces. *Video, camera, audio, Wi-Fi, Bluetooth: not yet.*
-4. **OnePlus drivers** — the boot modules (`oplusboot`, boot mode, project info, …) from OnePlus' SM8750 sources ([`scripts/build_oplus.sh`](scripts/build_oplus.sh)). *The other `oplus_*` modules (scheduler, storage, charger, …): not yet.*
-5. **Boot image** ([`scripts/build_bootimg.sh`](scripts/build_bootimg.sh)) — the modules and their load lists are built into the kernel as an initramfs unpacked *after* the stock ramdisks, so they replace the 6.6 modules without touching `vendor_boot`, `init_boot` or `vendor_dlkm`. That is what lets a single `fastboot boot boot.img` test the whole thing. First-stage init loads the phone's own first-stage order; the second stage's modules (USB, remoteproc, secure world, display, GPU, …) are loaded right after it, one child process each, by the reference's batch loader (the ramdisk is gone after `switch_root`). `op13_modload_tolerate=1` on the command line makes a module that fails to load a log line instead of the end of the boot.
+1. **Kernel** — Google's ACK 6.18 with the edits the vendor drivers need ([`tools/prep_common.sh`](tools/prep_common.sh): vendor hooks they call, behaviour of 6.6 they rely on, boot diagnostics) and `gki_defconfig` plus a few options ([`tools/config_gki.sh`](tools/config_gki.sh)).
+2. **SoC drivers** — clocks, pinctrl, interconnects, RPMh, SMMU, UFS, USB, PCIe, … from OnePlus' SM8850 (OnePlus 15) kernel tree, which also carries the SM8750 `sun` target, with the Xiaomi 13 port's 6.12 → 6.18 adaptation ([`scripts/build_soc.sh`](scripts/build_soc.sh), [`configs/op13_overrides.bzl`](configs/op13_overrides.bzl)).
+3. **Techpacks** — Qualcomm's multimedia and connectivity drivers built for `sun` ([`scripts/build_tp.sh`](scripts/build_tp.sh)): display, GPU, DSPs, audio, camera, video, Wi-Fi, data, secure world, … with this port's fixes for the OnePlus 13's device tree and user space ([`scripts/tp_op13_fix.py`](scripts/tp_op13_fix.py)).
+4. **OnePlus drivers** — built from OnePlus' own Bazel definitions ([`scripts/build_vendor.sh`](scripts/build_vendor.sh)): the OnePlus 13's 6.6 sources first, the OnePlus 15's 6.12 sources for what does not build from them, with the 6.18 API changes applied ([`scripts/vendor_fix618.py`](scripts/vendor_fix618.py), [`scripts/oplus_fix.py`](scripts/oplus_fix.py)).
+5. **Boot image** ([`scripts/build_bootimg.sh`](scripts/build_bootimg.sh)) — the modules and their load lists are built into the kernel as an initramfs unpacked *after* the stock ramdisks, so they replace the 6.6 modules without touching `vendor_boot`, `init_boot` or `vendor_dlkm`. That is what lets a single `fastboot boot` test the whole thing. First-stage init loads the phone's own first-stage list; the rest are loaded right after it, one child process each, by a batch loader (`k618_load`), which names a module whose load takes over 10 s.
 
 The stock device tree (in `vendor_boot`) stays in use, so the drivers have to match OnePlus' SM8750 bindings.
 
 ## Building
 
-Every push to `main` builds in GitHub Actions (LLVM 19, ccache). Locally, on an x86_64 or arm64 Linux host:
+Every push to `main` builds in GitHub Actions (LLVM 22, ccache; about 45 minutes with a warm cache). Locally, on an x86_64 or arm64 Linux host:
 
 ```bash
 bash scripts/fetch.sh        # all sources at pinned revisions (src/, ref_8550/)
@@ -38,40 +49,38 @@ bash scripts/build_soc.sh    # SoC modules for sun -> src/soc/**/*.ko
 
 ## Testing
 
-Download from [Releases](../../releases) (or the latest successful run's artifact, `op13-618-<n>` on the [Actions](../../actions) page), then:
+Download from [Releases](../../releases), then:
 
 ```bash
 adb reboot bootloader
-fastboot boot boot.img
+fastboot boot boot-full-testNN.img
 ```
 
 `fastboot boot` runs the image once from RAM; the next reboot is your installed kernel again. **Never `fastboot flash` these images.**
 
 | Image | What it is |
 |:--|:--|
-| `boot.img` | The port: 6.18 with our modules. |
-| `boot-rawlog.img` | The same, plus the reference's log writer (`k618_probe`), which also copies the kernel log onto the `rawdump` partition — for a boot whose RAM log does not survive the reset. It writes only to the partition whose partition-table name is `rawdump`, within its first 28 MB. |
+| `boot-full.img` | The port: 6.18 with every driver loaded. **Test this one.** |
+| `boot.img` | The same modules, but the drivers new to the port (audio, camera, Wi-Fi, charger, …) are held back, not loaded: a fallback for narrowing a problem down. It stops at the boot animation (no sound card). |
 | `diag-nolayer.img` | The bare 6.18 kernel without our modules: it reaches first-stage init and reboots on its own after ~15 s. |
 
-A boot that has not started zygote after 3 minutes stops itself (`op13_deadline=180`): it logs where every blocked task and init waits, and panics. Neither a panic nor a restart that Android asks for (`op13_hold_reboot=1`) restarts the phone: it stays on the screen it was on, and **you reset it with Power+VolUp** (10–15 s) — the phone's own restart would lose the log, the button reset keeps it. The stock kernel keeps its log ([`tools/prep_common.sh`](tools/prep_common.sh) puts 6.18's ramoops where the stock kernel's is, `0x880000000`). Read it on the stock system (needs root), before rebooting again:
+### When it stops
+
+A boot that has not started zygote after 60 s logs where every blocked task and every CPU is, and does so again every 60 s (`op13_deadline=60`). Neither a panic nor a restart that Android asks for (`op13_hold_reboot=1`) restarts the phone: it stays on the screen it was on, and **you reset it with Power+VolUp** (10–15 s) — the phone's own restart would lose the log, the button reset keeps it. Wait at least 70 s before the reset if it hangs while booting.
+
+6.18's kernel log is kept in the same RAM area as the stock kernel's ([`tools/prep_common.sh`](tools/prep_common.sh) puts its ramoops at `0x880000000`). Read it on the stock system (needs root there), before rebooting again:
 
 ```bash
-adb shell su -c 'ls -la /sys/fs/pstore; cat /sys/fs/pstore/console-ramoops*' > log.txt
+adb shell su -c 'cat /sys/fs/pstore/console-ramoops*' > log.txt
 ```
 
-After `boot-rawlog.img`, also:
-
-```bash
-adb shell su -c 'dd if=/dev/block/by-name/rawdump bs=1M count=28' > rawdump.bin
-python3 ref_8550/kernel-6.18/k618_rdread.py rawdump.bin rawdump.txt
-```
-
-Look for `op13:` lines (modules that did not load, the deadline) and `k618_load:` lines (the second-stage batch, one line per module).
+The log is a 256 KB ring (the stock kernel's layout, so the stock kernel can read it): its first 96 KB keep the start of the boot, the rest the newest lines. Look for `op13:` lines (the deadline dump) and `k618_load:` lines (the batch loader). If adb works on 6.18, `adb logcat -b all` too.
 
 ## Credits
 
 - **[JiaqiLi404/android_kernel_618_for_sm8550](https://github.com/JiaqiLi404/android_kernel_618_for_sm8550)** — the Xiaomi 13 Pro (SM8550) 6.18 port this project is based on: its 6.12 → 6.18 SoC integration, the vendor-module build approach, the GKI edits and the boot-image method are reused here.
 - **[OnePlusOSS](https://github.com/OnePlusOSS)** — [android_kernel_oneplus_sm8850](https://github.com/OnePlusOSS/android_kernel_oneplus_sm8850), [android_kernel_modules_and_devicetree_oneplus_sm8850](https://github.com/OnePlusOSS/android_kernel_modules_and_devicetree_oneplus_sm8850) and [android_kernel_modules_and_devicetree_oneplus_sm8750](https://github.com/OnePlusOSS/android_kernel_modules_and_devicetree_oneplus_sm8750).
+- **[LineageOS/android_kernel_oneplus_sm8650-modules](https://github.com/LineageOS/android_kernel_oneplus_sm8650-modules)** — OnePlus' published display extension for the OnePlus 12, read for how the composer's brightness property is meant to work (the OnePlus 13's is not published).
 - **Qualcomm** — the SoC and techpack drivers in those trees.
 - **Google** — [Android Common Kernel](https://android.googlesource.com/kernel/common), [clang prebuilts](https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86) and [mkbootimg](https://android.googlesource.com/platform/system/tools/mkbootimg).
 - **[palazik/android_kernel_common_oneplus_sm8750](https://github.com/palazik/android_kernel_common_oneplus_sm8750)** — the OnePlus 13 6.6 kernel this port starts from.
