@@ -110,6 +110,58 @@ EDITS = [
     ("display-drivers/msm/dsi/dsi_panel.c",
      "int dsi_panel_enable(struct dsi_panel *panel)\n{\n",
      "int dsi_panel_enable(struct dsi_panel *panel)\n{\n\tWRITE_ONCE(k618_panel_power_seq, k618_panel_power_seq + 1);\n"),
+    # AOD: in LP1/LP2 the panel's 0x51 is its AOD level -- the LP1 command set ends with the AOD
+    # "high" one (51 00 00 0c d4 on the AA569 panel). OnePlus' extension never writes the normal
+    # level there (oplus_ofp_backlight_filter: "aod state is true, filter backlight"); it picks the
+    # DT's aod-high/aod-low mode command from the ambient light instead. Here the composer's level
+    # went to 0x51 as is ~4 s after power-off, when the panel reached LP1 (test-58: AOD went
+    # bright). In LP1/LP2 the level now picks the DT's own AOD command: low for a dark-room AOD
+    # (a level under 1/8 of the panel's range: ColorOS asked for 3.5 nits in test-58's dark-room
+    # AOD, 126 nits otherwise), high otherwise; NOLP (screen on) applies the level again
+    # (sde_connector.c above). Each switch is logged ("op13: AOD light") to check the threshold.
+    ("display-drivers/msm/dsi/dsi_defs.h",
+     "\tDSI_CMD_SET_FPS_SWITCH,\n\tDSI_CMD_SET_MAX\n};",
+     "\tDSI_CMD_SET_FPS_SWITCH,\n"
+     "\tDSI_CMD_SET_K618_AOD_HIGH,\t/* op13: the DT's AOD light modes (scripts/tp_op13_fix.py) */\n"
+     "\tDSI_CMD_SET_K618_AOD_LOW,\n"
+     "\tDSI_CMD_SET_MAX\n};"),
+    ("display-drivers/msm/dsi/dsi_panel.c",
+     '\t"qcom,mdss-dsi-fps-switch-command",\n};',
+     '\t"qcom,mdss-dsi-fps-switch-command",\n'
+     '\t"qcom,mdss-dsi-aod-high-mode-command",\t/* op13 (scripts/tp_op13_fix.py) */\n'
+     '\t"qcom,mdss-dsi-aod-low-mode-command",\n};'),
+    ("display-drivers/msm/dsi/dsi_panel.c",
+     '\t"qcom,mdss-dsi-fps-switch-command-state",\n};',
+     '\t"qcom,mdss-dsi-fps-switch-command-state",\n'
+     '\t"qcom,mdss-dsi-aod-high-mode-command-state",\t/* op13 (scripts/tp_op13_fix.py) */\n'
+     '\t"qcom,mdss-dsi-aod-low-mode-command-state",\n};'),
+    ("display-drivers/msm/dsi/dsi_panel.c",
+     "int dsi_panel_set_backlight(struct dsi_panel *panel, u32 bl_lvl)\n{\n\tint rc = 0;\n"
+     "\tstruct dsi_backlight_config *bl = &panel->bl_config;\n\n"
+     "\tif (panel->host_config.ext_bridge_mode)\n\t\treturn 0;\n",
+     "/* op13: the AOD light mode sent last in this LP1/LP2 stay, -1 none (LP1 sends its own) */\n"
+     "static int k618_aod_light = -1;\n\n"
+     "int dsi_panel_set_backlight(struct dsi_panel *panel, u32 bl_lvl)\n{\n\tint rc = 0;\n"
+     "\tstruct dsi_backlight_config *bl = &panel->bl_config;\n\n"
+     "\tif (panel->host_config.ext_bridge_mode)\n\t\treturn 0;\n\n"
+     "\t/* op13: in AOD the level picks the panel's AOD light mode, it is not written as is\n"
+     "\t * (scripts/tp_op13_fix.py) */\n"
+     "\tif (panel->power_mode == SDE_MODE_DPMS_LP1 || panel->power_mode == SDE_MODE_DPMS_LP2) {\n"
+     "\t\tint light = bl_lvl < max(bl->bl_max_level / 8, 1U) ?\n"
+     "\t\t\t\tDSI_CMD_SET_K618_AOD_LOW : DSI_CMD_SET_K618_AOD_HIGH;\n\n"
+     "\t\tif (!bl_lvl || light == k618_aod_light || !panel->cur_mode ||\n"
+     "\t\t    !panel->cur_mode->priv_info ||\n"
+     "\t\t    !panel->cur_mode->priv_info->cmd_sets[light].count)\n\t\t\treturn 0;\n"
+     "\t\trc = dsi_panel_tx_cmd_set(panel, light, false);\n"
+     "\t\tif (!rc)\n\t\t\tk618_aod_light = light;\n"
+     "\t\tDSI_INFO(\"op13: AOD light %s (level %u), rc=%d\\n\",\n"
+     "\t\t\t light == DSI_CMD_SET_K618_AOD_LOW ? \"low\" : \"high\", bl_lvl, rc);\n"
+     "\t\treturn rc;\n\t}\n"
+     "\tk618_aod_light = -1;\n"),
+    ("display-drivers/msm/dsi/dsi_panel.c",
+     "int dsi_panel_set_lp1(struct dsi_panel *panel)\n{\n\tWRITE_ONCE(k618_panel_power_seq, k618_panel_power_seq + 1);\n",
+     "int dsi_panel_set_lp1(struct dsi_panel *panel)\n{\n\tWRITE_ONCE(k618_panel_power_seq, k618_panel_power_seq + 1);\n"
+     "\tk618_aod_light = -1;\t/* op13: LP1's own commands set the AOD level */\n"),
     # sun_perf_gpuconf has KGSL_USE_SHMEM: android_rvh_shmem_get_folio passes the folio order since
     # 6.12.18 -- in 6.18 too, not only up to 6.13
     ("graphics-kernel/kgsl_sharedmem.c",
