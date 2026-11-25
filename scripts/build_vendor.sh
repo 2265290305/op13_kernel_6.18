@@ -160,73 +160,9 @@ prepare() {
 	oplus_overlay "$P/inc" "$T/vendor/oplus"
 }
 
-# build <pass dir> <wanted lists> <search dirs for Makefile-only modules...>
-build() {
-	local P=$1 WANT=$2 T=$1/tree name pkg base needs n MO rc dir opts names tag vars defs o ko _l
-	shift 2
-	python3 -I "$ROOT/scripts/vendor_kbuild.py" "$P/modules.json" "$T" "$WANT" "$HAVE:$OUTM" "$P/plan.txt"
-	# in dependency levels (a module after everything it links against), each level's modules side
-	# by side, one per CPU: most of them need nothing of one another
-	python3 -I - "$P/plan.txt" > "$P/levels.txt" <<'PY'
-import sys
-plan = [l.rstrip("\n").split("|") for l in open(sys.argv[1]) if l.strip()]
-names = {p[0] for p in plan}
-lvl = {}
-for name, _pkg, _base, needs in plan:		# the plan is in dependency order
-	lvl[name] = 1 + max([lvl.get(n, 0) for n in needs.split() if n in names] + [0])
-for p in plan:
-	print("%d|%s" % (lvl[p[0]], "|".join(p)))
-PY
-	: > "$P/failed"
-	local level max
-	max=$(cut -d'|' -f1 "$P/levels.txt" | sort -n | tail -1)
-	for level in $(seq 1 "${max:-0}"); do
-		while IFS='|' read -r _l name pkg base needs; do
-			[ "$_l" = "$level" ] || continue
-			for n in $needs; do
-				if grep -qx "$n" "$P/failed"; then
-					echo "build_vendor: $name: left out ($n failed)" | tee -a "$LOG/summary.txt"
-					echo "$name" >> "$P/failed"; continue 2
-				fi
-			done
-			while [ "$(jobs -rp | wc -l)" -ge "$J" ]; do wait -n || true; done
-			(
-				MO=$P/obj/$name
-				mkdir -p "$MO"
-				# (the subshell has set -e: a failing make would end it before .result is written,
-				# and the module would count as neither built nor failed -- its failure never reached
-				# $P/failed or the summary, and nothing could try it again)
-				rc=0
-				MAKEFLAGS="$JOBSERVER" "${KMAKE[@]}" -k M="$T/$pkg" MO="$MO" OPMOD="$base" modules KBUILD_EXTRA_SYMBOLS="$SYMS" \
-					NOSTDINC_FLAGS="-nostdinc -I$P/inc -I$S/include -I$S/include/uapi -idirafter $W/inc8750 -idirafter $C -idirafter $S" \
-					KCFLAGS="-Wno-error -include $CONF" > "$LOG/$(basename "$P")-$name.log" 2>&1 || rc=$?
-				echo "$rc $MO/$base.ko" > "$MO/.result"
-			) < /dev/null &
-		done < "$P/levels.txt"
-		wait
-		# the level's results, in plan order
-		while IFS='|' read -r _l name pkg base needs; do
-			[ "$_l" = "$level" ] || continue
-			MO=$P/obj/$name
-			[ -d "$MO" ] || continue
-			rc=1; ko=$MO/$base.ko
-			[ -f "$MO/.result" ] && read -r rc ko < "$MO/.result"
-			if [ "$rc" -ne 0 ] || [ ! -f "$ko" ]; then
-				echo "build_vendor: $name: FAILED ($(basename "$P"), make exit $rc)" | tee -a "$LOG/summary.txt"
-				grep -E ': (fatal )?error: |^ERROR: modpost' "$LOG/$(basename "$P")-$name.log" | sed -E "s|$T/||" | head -6 \
-					| tee -a "$LOG/summary.txt" || true
-				echo "$name" >> "$P/failed"
-				continue
-			fi
-			echo "build_vendor: $name: built ($(basename "$P"))" | tee -a "$LOG/summary.txt"
-			ok=$((ok + 1))
-			SYMS="$SYMS $MO/Module.symvers"
-			cp "$ko" "$OUTM/"
-		done < "$P/levels.txt"
-	done
-	# the wanted modules made from plain Makefiles: each directory built once, with the options that
-	# switch its wanted modules on set to m (and defined for the C code)
-	python3 -I "$ROOT/scripts/vendor_mkplan.py" "$T" "$WANT" "$HAVE:$OUTM" "$P/mkplan.txt" "$@"
+# mk_loop <plan>: the Makefile directories of a plan (build()'s P, T), each made once
+mk_loop() {
+	local dir opts names tag MO vars defs o rc n o1 MO1 ko
 	while IFS='|' read -r dir opts names; do
 		tag=$(basename "$P")-mk-$(echo "$dir" | tr '/' '_')
 		MO=$P/obj/$tag
@@ -316,8 +252,113 @@ PY2
 		done
 		[ $rc -eq 0 ] || grep -E ': (fatal )?error: |^ERROR: modpost' "$LOG/$tag.log" | sed -E "s|$T/||" | head -6 \
 			| tee -a "$LOG/summary.txt" || true
-		[ -f "$MO/Module.symvers" ] && SYMS="$SYMS $MO/Module.symvers"
-	done < "$P/mkplan.txt"
+		[ -f "$MO/Module.symvers" ] && case " $SYMS " in *" $MO/Module.symvers "*) ;; *) SYMS="$SYMS $MO/Module.symvers" ;; esac
+	done < "$1"
+}
+
+# build <pass dir> <wanted lists> <search dirs for Makefile-only modules...>
+build() {
+	local P=$1 WANT=$2 T=$1/tree name pkg base needs n MO rc dir opts names tag vars defs o ko _l
+	shift 2
+	python3 -I "$ROOT/scripts/vendor_kbuild.py" "$P/modules.json" "$T" "$WANT" "$HAVE:$OUTM" "$P/plan.txt"
+	# in dependency levels (a module after everything it links against), each level's modules side
+	# by side, one per CPU: most of them need nothing of one another
+	python3 -I - "$P/plan.txt" > "$P/levels.txt" <<'PY'
+import sys
+plan = [l.rstrip("\n").split("|") for l in open(sys.argv[1]) if l.strip()]
+names = {p[0] for p in plan}
+lvl = {}
+for name, _pkg, _base, needs in plan:		# the plan is in dependency order
+	lvl[name] = 1 + max([lvl.get(n, 0) for n in needs.split() if n in names] + [0])
+for p in plan:
+	print("%d|%s" % (lvl[p[0]], "|".join(p)))
+PY
+	: > "$P/failed"
+	local level max
+	max=$(cut -d'|' -f1 "$P/levels.txt" | sort -n | tail -1)
+	for level in $(seq 1 "${max:-0}"); do
+		while IFS='|' read -r _l name pkg base needs; do
+			[ "$_l" = "$level" ] || continue
+			for n in $needs; do
+				if grep -qx "$n" "$P/failed"; then
+					echo "build_vendor: $name: left out ($n failed)" | tee -a "$LOG/summary.txt"
+					echo "$name" >> "$P/failed"; continue 2
+				fi
+			done
+			while [ "$(jobs -rp | wc -l)" -ge "$J" ]; do wait -n || true; done
+			(
+				MO=$P/obj/$name
+				mkdir -p "$MO"
+				# (the subshell has set -e: a failing make would end it before .result is written,
+				# and the module would count as neither built nor failed -- its failure never reached
+				# $P/failed or the summary, and nothing could try it again)
+				rc=0
+				MAKEFLAGS="$JOBSERVER" "${KMAKE[@]}" -k M="$T/$pkg" MO="$MO" OPMOD="$base" modules KBUILD_EXTRA_SYMBOLS="$SYMS" \
+					NOSTDINC_FLAGS="-nostdinc -I$P/inc -I$S/include -I$S/include/uapi -idirafter $W/inc8750 -idirafter $C -idirafter $S" \
+					KCFLAGS="-Wno-error -include $CONF" > "$LOG/$(basename "$P")-$name.log" 2>&1 || rc=$?
+				echo "$rc $MO/$base.ko" > "$MO/.result"
+			) < /dev/null &
+		done < "$P/levels.txt"
+		wait
+		# the level's results, in plan order
+		while IFS='|' read -r _l name pkg base needs; do
+			[ "$_l" = "$level" ] || continue
+			MO=$P/obj/$name
+			[ -d "$MO" ] || continue
+			rc=1; ko=$MO/$base.ko
+			[ -f "$MO/.result" ] && read -r rc ko < "$MO/.result"
+			if [ "$rc" -ne 0 ] || [ ! -f "$ko" ]; then
+				echo "build_vendor: $name: FAILED ($(basename "$P"), make exit $rc)" | tee -a "$LOG/summary.txt"
+				grep -E ': (fatal )?error: |^ERROR: modpost' "$LOG/$(basename "$P")-$name.log" | sed -E "s|$T/||" | head -6 \
+					| tee -a "$LOG/summary.txt" || true
+				echo "$name" >> "$P/failed"
+				continue
+			fi
+			echo "build_vendor: $name: built ($(basename "$P"))" | tee -a "$LOG/summary.txt"
+			ok=$((ok + 1))
+			SYMS="$SYMS $MO/Module.symvers"
+			cp "$ko" "$OUTM/"
+		done < "$P/levels.txt"
+	done
+	# modules that failed only at the link, for a symbol of a module of this pass their Bazel target
+	# does not name (the OnePlus 13's tri_key and sensor_feedback call kernel_fb's oplus_kevent_fb,
+	# magnetic_cover calls magcvr_notify): tried again in this pass, before its Makefile modules (the
+	# hall sensors link against tri_key) and before the next pass takes them -- for the OnePlus 13,
+	# while everything exported is the kernel's, the SoC's, the techpacks' or its own
+	local r
+	for r in 1 2 3; do
+		again=0
+		retry_round "$(basename "$P") relink round $r" "$P"
+		[ "$again" -eq 1 ] || break
+	done
+	# the wanted modules made from plain Makefiles: each directory built once, with the options that
+	# switch its wanted modules on set to m (and defined for the C code)
+	python3 -I "$ROOT/scripts/vendor_mkplan.py" "$T" "$WANT" "$HAVE:$OUTM" "$P/mkplan.txt" "$@"
+	mk_loop "$P/mkplan.txt"
+	# a directory whose modules failed only at the link, for a symbol a directory built after it
+	# exports (the OnePlus 13's oplus_f2fslog_storage and oplus_uprobe: pr_storage of
+	# oplus_storage_log, a directory later): built once more now, for the modules still missing
+	python3 -I - "$P/mkplan.txt" "$P/mkplan2.txt" "$OUTM" "$LOG" "$(basename "$P")" <<'PY'
+import os, re, sys
+plan, out, outm, log, pas = sys.argv[1:]
+have = {f[:-3].replace("-", "_") for f in os.listdir(outm) if f.endswith(".ko")}
+keep = []
+for line in open(plan):
+	d, opts, names = line.rstrip("\n").split("|")
+	missing = [n for n in names.split() if n.replace("-", "_") not in have]
+	if not missing:
+		continue
+	tag = pas + "-mk-" + d.replace("/", "_")
+	logs = [os.path.join(log, tag + ".log")] + [os.path.join(log, tag + "-" + n + ".log") for n in missing]
+	text = "".join(open(l, errors="ignore").read() for l in logs if os.path.isfile(l))
+	if re.search(r"^ERROR: modpost: .* undefined!", text, re.M) and not re.search(r": (fatal )?error: ", text):
+		keep.append("%s|%s|%s\n" % (d, opts, " ".join(missing)))
+open(out, "w").write("".join(keep))
+PY
+	if [ -s "$P/mkplan2.txt" ]; then
+		echo "build_vendor: $(wc -l < "$P/mkplan2.txt") Makefile directories again, for symbols built after them" | tee -a "$LOG/summary.txt"
+		mk_loop "$P/mkplan2.txt"
+	fi
 	return 0
 }
 
@@ -344,6 +385,63 @@ for l in lists:
 open(out, "w").write("".join(n + ".ko\n" for n in want))
 print(len(want))
 PY
+}
+
+# retry_round <label> <pass dirs...>: modules of those passes that failed only because something
+# they link against was not built yet when they were tried -- every undefined symbol exported by now
+# (SYMS) -- or were left out for a dependency built by now, tried again. Sets again=1 on progress.
+retry_round() {
+	local label=$1 tag P name pkg base needs missing L MO _l _n
+	shift
+	tag=$(echo "$label" | tr -c 'A-Za-z0-9\n' '_')
+	# every symbol exported by now
+	cat $SYMS "$O/Module.symvers" "$S/Module.symvers" 2>/dev/null | awk '{ print $2 }' | sort -u > "$W/exported.txt"
+	ls "$OUTM" "$HAVE" 2>/dev/null | sed -n 's/\.ko$//p' | sort -u > "$W/built.txt"
+	again=0
+	echo "$label: $(wc -l < "$W/exported.txt") symbols exported, $(wc -l < "$W/built.txt") modules built; passes: $*" >> "$LOG/retry.txt"
+	for P in "$@"; do
+		[ -f "$P/failed" ] || echo "second chance: no $P/failed" >> "$LOG/retry.txt"
+		[ -f "$P/failed" ] && [ -f "$P/levels.txt" ] || continue
+		while read -r name; do
+			pkg=; base=; needs=
+			IFS='|' read -r _l _n pkg base needs < <(awk -F'|' -v n="$name" '$2 == n' "$P/levels.txt") || true
+			[ -n "$pkg" ] || { echo "second chance: $name: not in $(basename "$P")'s plan" >> "$LOG/retry.txt"; continue; }
+			grep -qx "$base" "$W/built.txt" && continue
+			L=$LOG/$(basename "$P")-$name.log
+			if [ -f "$L" ]; then
+				grep -q '^ERROR: modpost: .* undefined!' "$L" || { echo "second chance: $name: not a link failure" >> "$LOG/retry.txt"; continue; }
+				grep -qE ': (fatal )?error: ' "$L" && { echo "second chance: $name: compile errors" >> "$LOG/retry.txt"; continue; }
+				sed -n -E 's/^ERROR: modpost: "([^"]+)" .* undefined!/\1/p' "$L" | sort -u > "$W/need.txt"
+				if [ -n "$(comm -23 "$W/need.txt" "$W/exported.txt")" ]; then
+					echo "second chance: $name: still missing $(comm -23 "$W/need.txt" "$W/exported.txt" | head -3 | tr '\n' ' ')" >> "$LOG/retry.txt"
+					continue
+				fi
+			else
+				# left out: all it needs built by now
+				missing=0
+				for d in $needs; do grep -qx "$d" "$W/built.txt" || missing=1; done
+				[ "$missing" -eq 0 ] || continue
+			fi
+			MO=$P/obj/$name
+			mkdir -p "$MO"
+			set +e
+			MAKEFLAGS="$JOBSERVER" "${KMAKE[@]}" -k M="$P/tree/$pkg" MO="$MO" OPMOD="$base" modules KBUILD_EXTRA_SYMBOLS="$SYMS" \
+				NOSTDINC_FLAGS="-nostdinc -I$P/inc -I$S/include -I$S/include/uapi -idirafter $W/inc8750 -idirafter $C -idirafter $S" \
+				KCFLAGS="-Wno-error -include $CONF" > "$L.$tag" 2>&1
+			set -e
+			if [ -f "$MO/$base.ko" ]; then
+				echo "build_vendor: $name: built ($(basename "$P"), $label)" | tee -a "$LOG/summary.txt"
+				cp "$MO/$base.ko" "$OUTM/"; ok=$((ok + 1)); again=1
+				echo "$base" >> "$W/built.txt"
+				[ -f "$MO/Module.symvers" ] && SYMS="$SYMS $MO/Module.symvers"
+			else
+				echo "build_vendor: $name: FAILED again ($(basename "$P"), $L.$tag)" | tee -a "$LOG/summary.txt"
+				grep -E ': (fatal )?error: |^ERROR: modpost' "$L.$tag" | head -4 | tee -a "$LOG/summary.txt" || true
+				# the next round judges it by this attempt
+				cp "$L.$tag" "$L"
+			fi
+		done < "$P/failed"
+	done
 }
 
 # pass 1: the OnePlus 13's own 6.6 tree, with Qualcomm's touch-drivers, the NFC drivers of the
@@ -373,6 +471,7 @@ if [ -d "$ROOT/src/msm8750/drivers" ]; then
 fi
 build "$P1" "$ST/first_stage.load:$ST/vendor_dlkm.load:$ST/system_dlkm.load" \
 	vendor/oplus vendor/st vendor/nxp vendor/oplus8850 vendor/qcom/opensource msm8750
+
 
 # pass 2: what is still missing, from OnePlus' 6.12 tree for the OnePlus 15
 n=$(still_wanted "$W/wanted2.txt")
@@ -432,52 +531,7 @@ fi
 LATE=$(find "$ROOT/out/soc-late" -name Module.symvers 2>/dev/null | tr '\n' ' ')
 SYMS="$SYMS $LATE"
 for round in 1 2; do
-	# every symbol exported by now
-	cat $SYMS "$O/Module.symvers" "$S/Module.symvers" 2>/dev/null | awk '{ print $2 }' | sort -u > "$W/exported.txt"
-	ls "$OUTM" "$HAVE" 2>/dev/null | sed -n 's/\.ko$//p' | sort -u > "$W/built.txt"
-	again=0
-	echo "second chance round $round: $(wc -l < "$W/exported.txt") symbols exported, $(wc -l < "$W/built.txt") modules built; passes: $P1 ${P2:-}" >> "$LOG/retry.txt"
-	for P in "$P1" ${P2:+"$P2"}; do
-		[ -f "$P/failed" ] || echo "second chance: no $P/failed" >> "$LOG/retry.txt"
-		[ -f "$P/failed" ] && [ -f "$P/levels.txt" ] || continue
-		while read -r name; do
-			pkg=; base=; needs=
-			IFS='|' read -r _l _n pkg base needs < <(awk -F'|' -v n="$name" '$2 == n' "$P/levels.txt") || true
-			[ -n "$pkg" ] || { echo "second chance: $name: not in $(basename "$P")'s plan" >> "$LOG/retry.txt"; continue; }
-			grep -qx "$base" "$W/built.txt" && continue
-			L=$LOG/$(basename "$P")-$name.log
-			if [ -f "$L" ]; then
-				grep -q '^ERROR: modpost: .* undefined!' "$L" || { echo "second chance: $name: not a link failure" >> "$LOG/retry.txt"; continue; }
-				grep -qE ': (fatal )?error: ' "$L" && { echo "second chance: $name: compile errors" >> "$LOG/retry.txt"; continue; }
-				sed -n -E 's/^ERROR: modpost: "([^"]+)" .* undefined!/\1/p' "$L" | sort -u > "$W/need.txt"
-				if [ -n "$(comm -23 "$W/need.txt" "$W/exported.txt")" ]; then
-					echo "second chance: $name: still missing $(comm -23 "$W/need.txt" "$W/exported.txt" | head -3 | tr '\n' ' ')" >> "$LOG/retry.txt"
-					continue
-				fi
-			else
-				# left out: all it needs built by now
-				missing=0
-				for d in $needs; do grep -qx "$d" "$W/built.txt" || missing=1; done
-				[ "$missing" -eq 0 ] || continue
-			fi
-			MO=$P/obj/$name
-			mkdir -p "$MO"
-			set +e
-			MAKEFLAGS="$JOBSERVER" "${KMAKE[@]}" -k M="$P/tree/$pkg" MO="$MO" OPMOD="$base" modules KBUILD_EXTRA_SYMBOLS="$SYMS" \
-				NOSTDINC_FLAGS="-nostdinc -I$P/inc -I$S/include -I$S/include/uapi -idirafter $W/inc8750 -idirafter $C -idirafter $S" \
-				KCFLAGS="-Wno-error -include $CONF" > "$L.retry$round" 2>&1
-			set -e
-			if [ -f "$MO/$base.ko" ]; then
-				echo "build_vendor: $name: built ($(basename "$P"), second chance $round)" | tee -a "$LOG/summary.txt"
-				cp "$MO/$base.ko" "$OUTM/"; ok=$((ok + 1)); again=1
-				echo "$base" >> "$W/built.txt"
-				[ -f "$MO/Module.symvers" ] && SYMS="$SYMS $MO/Module.symvers"
-			else
-				echo "build_vendor: $name: FAILED again ($(basename "$P"), $L.retry$round)" | tee -a "$LOG/summary.txt"
-				grep -E ': (fatal )?error: |^ERROR: modpost' "$L.retry$round" | head -4 | tee -a "$LOG/summary.txt" || true
-			fi
-		done < "$P/failed"
-	done
+	retry_round "second chance round $round" "$P1" ${P2:+"$P2"}
 	[ "$again" -eq 1 ] || break
 done
 
