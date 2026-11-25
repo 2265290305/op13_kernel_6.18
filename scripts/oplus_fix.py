@@ -256,6 +256,11 @@ EDITS = [
      "EXPORT_SYMBOL(cnss_pci_get_iova_info);\n\n"
      "int cnss_pci_get_iova_ipa(struct cnss_pci_data *pci_priv, u64 *addr, u64 *size)\n",
      "cnss_pci_get_iova_info"),
+    # nxp-nci asks an unpublished OnePlus module for the NFC chip's ID (get_nfc_id); OnePlus' own
+    # earlier way, left commented out under it, reads the ID GPIO in this driver
+    ("nfc/i2c_drv.c",
+     '                    gpio_value = get_nfc_id();\n                    pr_info("%s, final gpio_value = %d\\n", __func__, gpio_value);\n                    if (gpio_value == INVALID_ID) {\n                        for (int delay = 0; delay < 6; delay++) {\n                            msleep(500);\n                            gpio_value = get_nfc_id();\n                            if(gpio_value != INVALID_ID) {\n                                pr_info("retry times = %d\\n",delay);\n                                break;\n                            }\n                        }\n                        if(gpio_value == INVALID_ID) {\n                            err = -EINVAL;\n                        }\n                    }\n                    //err = nxp_nfc_get_gpio_value_three(dev, &gpio_value);\n',
+     '                    /* op13: the ID read from its GPIO here, as OnePlus did before get_nfc_id(),\n                     * whose OnePlus module is not published (scripts/oplus_fix.py) */\n                    err = nxp_nfc_get_gpio_value_three(dev, &gpio_value);\n                    pr_info("%s, final gpio_value = %d\\n", __func__, gpio_value);\n'),
 ]
 
 
