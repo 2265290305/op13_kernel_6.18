@@ -254,6 +254,9 @@ PY2
 			| tee -a "$LOG/summary.txt" || true
 		[ -f "$MO/Module.symvers" ] && case " $SYMS " in *" $MO/Module.symvers "*) ;; *) SYMS="$SYMS $MO/Module.symvers" ;; esac
 	done < "$1"
+	# (not the status of the loop's last test: under set -e a 1 here ended the script -- run
+	# 45706583266 stopped after the Makefile retry, before the OnePlus 15 pass)
+	return 0
 }
 
 # build <pass dir> <wanted lists> <search dirs for Makefile-only modules...>
@@ -442,6 +445,7 @@ retry_round() {
 			fi
 		done < "$P/failed"
 	done
+	return 0
 }
 
 # pass 1: the OnePlus 13's own 6.6 tree, with Qualcomm's touch-drivers, the NFC drivers of the
