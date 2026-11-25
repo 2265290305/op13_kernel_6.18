@@ -226,6 +226,15 @@ EDITS = [
      "#ifndef CONFIG_DISABLE_OPLUS_FUNCTION\n#include <soc/oplus/system/oplus_project.h>",
      "#ifndef CONFIG_OPLUS_SYSTEM_KERNEL_QCOM\t/* op13: scripts/oplus_fix.py */\n#define CONFIG_OPLUS_SYSTEM_KERNEL_QCOM 1\n#endif\n"
      "#ifndef CONFIG_DISABLE_OPLUS_FUNCTION\n#include <soc/oplus/system/oplus_project.h>"),
+    # cnss2 walks the chip's "iommu-addresses" trusting of_translate_dma_region() to move on: on an
+    # entry that does not translate it returns NULL, and the loop went on from NULL for good
+    # (test-55: the first stage stuck, CPU 6 in it). Such an entry ends the walk, as in the kernel's
+    # of_iommu (tools/prep_common.sh, which also makes these entries translate again)
+    ("cnss2/pci_qcom.c",
+     "\t\tmaps = of_translate_dma_region(pci_dev->dev.of_node, maps,\n\t\t\t\t\t       &iova, &length);\n",
+     "\t\tmaps = of_translate_dma_region(pci_dev->dev.of_node, maps,\n\t\t\t\t\t       &iova, &length);\n"
+     "\t\tif (!maps) {\t/* op13: does not translate (scripts/oplus_fix.py) */\n"
+     "\t\t\tof_node_put(of_node);\n\t\t\treturn -EINVAL;\n\t\t}\n"),
     # charger v2's chg_err: each call site at most 3 lines per 10 s. Its init works retry every
     # 100 ms until the ADSP's gauge/buck appear (second stage) and printed 2 errors each time, which
     # overwrote pstore's whole 160 KB ring in ~40 s (test-55: the stuck first stage's log lost)

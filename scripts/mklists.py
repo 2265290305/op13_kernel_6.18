@@ -31,6 +31,12 @@ EARLY = ["qcom_dynamic_ramoops"]
 # port (scripts/build_extra.sh) that are not needed to boot -- one that hangs or oopses at load then
 # holds nothing else up. Their probes also run asynchronously (driver_async_probe= in the cmdline).
 LATE = ["oplus_bsp_synaptics_tcm2"]
+# ... but not async_probe=1 for these: it makes every driver of the module probe in the background,
+# and cnss2 registers its PCI driver inside its own (already asynchronous) platform probe and, when
+# no chip probes, unregisters it there: driver_detach() then waits for all background probes, its
+# own included, for good (test-55: the first stage stuck, a kworker in cnss_pci_init ->
+# pci_unregister_driver -> async_synchronize_full). Stock loads it without the option.
+SYNC = {"cnss2"}
 # the new list (optional, one module name a line): every driver scripts/build_vendor.sh brought over
 # from OnePlus' 6.6 sources. They are LATE too, also those the phone loads in its first stage (they
 # move to the end of the batch), and each gets async_probe=1 in modules.options: its probes run in
@@ -131,7 +137,7 @@ def main(argv):
         f.write("softdep k618_load pre: " + " ".join(canon(m) for m in first) + "\n")
     open(f"{rd}/modules.options", "w").write(
         "options k618_load list=/lib/modules/k618_batch.load dir=/lib/modules helper=/k618_umh\n"
-        + "".join(f"options {canon(m)} async_probe=1\n" for m in late if canon(m) in new))
+        + "".join(f"options {canon(m)} async_probe=1\n" for m in late if canon(m) in new and canon(m) not in SYNC))
     shutil.copy(f"{stock}/modules.blocklist", f"{rd}/modules.blocklist")
 
     os.makedirs(report, exist_ok=True)

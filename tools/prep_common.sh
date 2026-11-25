@@ -580,6 +580,41 @@ PY
 	echo "of_iommu_get_resv_regions: untranslatable entries end the list"
 fi
 
+# of_match_bus(): a node without "#address-cells" of its own matched no bus in 6.18 (6.6's "default"
+# bus matched every node, with the cells inherited from its parents), so every address below it
+# was untranslatable. The OnePlus 13's DT has such nodes: the PCIe root ports (pcie0_rp: reg and
+# phandle only) between the Wi-Fi chip (cnss_pci0) and its controller, so the chip's
+# "iommu-addresses" did not translate -- the kernel set no reserved IOVA regions for it, and cnss2's
+# cnss_pci_get_iommu_addr() looped on the NULL for good in the first stage (test-55: boot-full
+# stuck on the logo, CPU 6 in of_translate_dma_region). Such a node gets 6.6's bus again: the
+# default one with a flags cell when it inherits 3 address cells, the plain default one otherwise.
+OA=$C/drivers/of/address.c
+if ! grep -q 'op13: a node without #address-cells' $OA; then
+	python3 -I - "$OA" <<'PY'
+import sys
+p = sys.argv[1]
+t = open(p).read()
+old = ("\tfor (i = 0; i < ARRAY_SIZE(of_busses); i++)\n"
+       "\t\tif (!of_busses[i].match || of_busses[i].match(np))\n"
+       "\t\t\treturn &of_busses[i];\n"
+       "\treturn NULL;\n}\n")
+new = ("\tfor (i = 0; i < ARRAY_SIZE(of_busses); i++)\n"
+       "\t\tif (!of_busses[i].match || of_busses[i].match(np))\n"
+       "\t\t\treturn &of_busses[i];\n"
+       "\t/* op13: a node without #address-cells inherits its parents' cells, as in 6.6\n"
+       "\t * (tools/prep_common.sh): default-flags for 3, default otherwise */\n"
+       "\tif (np && !of_property_present(np, \"#address-cells\"))\n"
+       "\t\treturn &of_busses[ARRAY_SIZE(of_busses) - (of_bus_n_addr_cells(np) == 3 ? 2 : 1)];\n"
+       "\treturn NULL;\n}\n")
+assert t.count(old) == 1, "of_match_bus"
+t = t.replace(old, new, 1)
+assert t.count('.name = "default-flags"') == 1 and t.index('.name = "default-flags"') < t.index('.name = "default",')
+open(p, "w").write(t)
+PY
+	grep -q 'op13: a node without #address-cells' $OA || { echo "of_match_bus: edit failed"; exit 1; }
+	echo "of_match_bus: nodes without #address-cells inherit their parents' cells again"
+fi
+
 # a 4096-byte command line: the bootloader appends its own (msm_drm.dsi_display0=<panel>,
 # oplus_bsp_tp_custom.dsi_display0=<panel> ...) after the boot image's, and with ours the whole was
 # cut at 2048 (test-46: 2045 bytes kept, oplus_bsp_tp_custom.dsi_display0 gone -- the touch driver
