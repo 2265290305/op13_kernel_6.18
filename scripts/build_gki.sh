@@ -6,7 +6,9 @@ set -e
 bash "$ROOT/tools/prep_common.sh"
 bash "$ROOT/tools/config_gki.sh" "$C" "$O"
 start=$(date +%s)
-"${KMAKE[@]}" -j"$J" Image modules > "$ROOT/out/gki-build.log" 2>&1 || {
+# KernelSU (drivers/kernelsu) includes SELinux's generated headers (flask.h, av_permissions.h) from
+# the object tree; in one parallel build nothing orders it after security/selinux, so that first
+{ "${KMAKE[@]}" -j"$J" security/selinux/ && "${KMAKE[@]}" -j"$J" Image modules; } > "$ROOT/out/gki-build.log" 2>&1 || {
 	grep -E ': (fatal )?error: |\*\*\* ' "$ROOT/out/gki-build.log" | head -30
 	echo "build_gki: FAILED after $(( $(date +%s) - start )) s"
 	exit 1

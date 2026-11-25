@@ -32,12 +32,14 @@ for c in $GKI_MODS; do args="$args -m $c"; done
 # (init/Kconfig), and with Rust go ashmem -- Android's, in Rust since 6.12 -- and the Rust binder
 # module; genksyms here had turned all three off (olddefconfig, silently). SHA-256 module
 # signatures: hosts with a strict crypto policy (RHEL 9) refuse to make SHA-1 ones.
+# KernelSU (BakaSU, tools/prep_common.sh) built in, with its tracepoint syscall hooks.
 $C/scripts/config --file "$O/.config" $args -d STATIC_USERMODEHELPER \
 	-e DEBUG_INFO_BTF -e MODULE_ALLOW_BTF_MISMATCH -e MEMCG_V1 \
 	-e RUST -e GENDWARFKSYMS -d MODULE_SIG_SHA1 -e MODULE_SIG_SHA256 --set-val LOG_BUF_SHIFT 18 \
+	-e KSU -e KSU_TRACEPOINT_HOOK \
 	--set-str LOCALVERSION "$KNAME" -d LOCALVERSION_AUTO
 $M olddefconfig >> "$O/../gki-config.log" 2>&1
-for c in MEMCG_V1 RUST ASHMEM GENDWARFKSYMS DEBUG_INFO_DWARF5 DEBUG_INFO_BTF MODULE_ALLOW_BTF_MISMATCH MODULE_SIG_SHA256; do
+for c in MEMCG_V1 RUST ASHMEM GENDWARFKSYMS DEBUG_INFO_DWARF5 DEBUG_INFO_BTF MODULE_ALLOW_BTF_MISMATCH MODULE_SIG_SHA256 KSU KSU_TRACEPOINT_HOOK; do
 	grep -q "^CONFIG_$c=y" "$O/.config" || { echo "config_gki: CONFIG_$c did not take"; exit 1; }
 done
 for c in $GKI_MODS; do

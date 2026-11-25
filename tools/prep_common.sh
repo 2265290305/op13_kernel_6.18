@@ -689,6 +689,22 @@ if ! grep -q 'COMMAND_LINE_SIZE	4096' $CL; then
 	echo "command line size 4096"
 fi
 
+# KernelSU built in: BakaSU (src/KernelSU, scripts/fetch.sh pins it) as drivers/kernelsu, wired the
+# way its kernel/setup.sh does (a link, its Makefile line, its Kconfig in the drivers menu).
+# Tracepoint syscall hooks (its default for GKI 2.0 kernels), so no kernel source hooks; the
+# option itself in tools/config_gki.sh. The link keeps BakaSU's own git tree, which its Kbuild
+# reads its version from.
+KSU_SRC=$ROOT/src/KernelSU/kernel
+[ -f "$KSU_SRC/Kbuild" ] || { echo "KernelSU: $KSU_SRC missing (scripts/fetch.sh)"; exit 1; }
+ln -sfn ../../KernelSU/kernel "$C/drivers/kernelsu"
+[ -f "$C/drivers/kernelsu/Kbuild" ] || { echo "KernelSU: drivers/kernelsu link broken"; exit 1; }
+grep -q 'kernelsu/' "$C/drivers/Makefile" || printf '\nobj-$(CONFIG_KSU) += kernelsu/\n' >> "$C/drivers/Makefile"
+grep -q 'source "drivers/kernelsu/Kconfig"' "$C/drivers/Kconfig" \
+	|| sed -i '/^endmenu/i source "drivers/kernelsu/Kconfig"' "$C/drivers/Kconfig"
+[ "$(grep -c 'source "drivers/kernelsu/Kconfig"' "$C/drivers/Kconfig")" = 1 ] \
+	|| { echo "KernelSU: Kconfig edit failed"; exit 1; }
+echo "KernelSU: BakaSU $(git -C "$ROOT/src/KernelSU" rev-parse --short HEAD) as drivers/kernelsu"
+
 # built-in initramfs (our module layer) unpacked after the bootloader's ramdisks, so it wins
 python3 -I - "$REF" "$C" <<'PY'
 import sys

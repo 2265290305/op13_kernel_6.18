@@ -56,13 +56,35 @@ fetch_sparse src/msm8750 https://github.com/OnePlusOSS/android_kernel_oneplus_sm
 	6028f47faddaa27700f8dd3a1d83906ea8f27170 &
 msm_pid=$!
 
+# KernelSU, built into the kernel: BakaSU at a pinned commit (a new upstream push changes nothing
+# here until this pin moves). Its whole history and tags (blobless): its Kbuild makes the version
+# code the manager checks from `git rev-list --count HEAD`, the name from `git describe --tags`.
+KSU_URL=https://github.com/Baka-SU/BakaSU.git
+KSU_REV=57b2db6076f439cfd489f14576444e8f0f2f0a25
+fetch_ksu() {
+	local path=src/KernelSU
+	if [ "$(git -C "$path" rev-parse -q --verify HEAD 2> /dev/null)" = "$KSU_REV" ]; then
+		echo "$path: present ($(git -C "$path" rev-parse --short HEAD))"
+		return
+	fi
+	if [ ! -d "$path/.git" ]; then
+		git clone -q --filter=blob:none --no-checkout "$KSU_URL" "$path"
+	else
+		git -C "$path" fetch -q --tags --filter=blob:none origin
+	fi
+	git -C "$path" -c advice.detachedHead=false checkout -q "$KSU_REV"
+	echo "$path: $(git -C "$path" rev-parse --short HEAD) (version code $((30000 + $(git -C "$path" rev-list --count HEAD) + 700)))"
+}
+fetch_ksu &
+ksu_pid=$!
+
 pids=()
 for item in "${INPUTS[@]}"; do
 	IFS='|' read -r path url rev <<< "$item"
 	fetch "$path" "$url" "$rev" &
 	pids+=($!)
 done
-for p in "${pids[@]}" "$msm_pid"; do wait "$p"; done
+for p in "${pids[@]}" "$msm_pid" "$ksu_pid"; do wait "$p"; done
 
 # the reference's 6.18 SoC integration (6.12 -> 6.18 fixes, plus kalama, which sun does not use)
 SOC=src/soc
