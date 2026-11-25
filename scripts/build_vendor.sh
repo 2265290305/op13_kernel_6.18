@@ -193,10 +193,14 @@ PY
 			(
 				MO=$P/obj/$name
 				mkdir -p "$MO"
+				# (the subshell has set -e: a failing make would end it before .result is written,
+				# and the module would count as neither built nor failed -- its failure never reached
+				# $P/failed or the summary, and nothing could try it again)
+				rc=0
 				MAKEFLAGS="$JOBSERVER" "${KMAKE[@]}" -k M="$T/$pkg" MO="$MO" OPMOD="$base" modules KBUILD_EXTRA_SYMBOLS="$SYMS" \
 					NOSTDINC_FLAGS="-nostdinc -I$P/inc -I$S/include -I$S/include/uapi -idirafter $W/inc8750 -idirafter $C -idirafter $S" \
-					KCFLAGS="-Wno-error -include $CONF" > "$LOG/$(basename "$P")-$name.log" 2>&1
-				echo "$? $MO/$base.ko" > "$MO/.result"
+					KCFLAGS="-Wno-error -include $CONF" > "$LOG/$(basename "$P")-$name.log" 2>&1 || rc=$?
+				echo "$rc $MO/$base.ko" > "$MO/.result"
 			) < /dev/null &
 		done < "$P/levels.txt"
 		wait
@@ -204,8 +208,9 @@ PY
 		while IFS='|' read -r _l name pkg base needs; do
 			[ "$_l" = "$level" ] || continue
 			MO=$P/obj/$name
-			[ -f "$MO/.result" ] || continue
-			read -r rc ko < "$MO/.result"
+			[ -d "$MO" ] || continue
+			rc=1; ko=$MO/$base.ko
+			[ -f "$MO/.result" ] && read -r rc ko < "$MO/.result"
 			if [ "$rc" -ne 0 ] || [ ! -f "$ko" ]; then
 				echo "build_vendor: $name: FAILED ($(basename "$P"), make exit $rc)" | tee -a "$LOG/summary.txt"
 				grep -E ': (fatal )?error: |^ERROR: modpost' "$LOG/$(basename "$P")-$name.log" | sed -E "s|$T/||" | head -6 \
