@@ -119,22 +119,22 @@ EDITS = [
     # (a level under 1/8 of the panel's range: ColorOS asked for 3.5 nits in test-58's dark-room
     # AOD, 126 nits otherwise), high otherwise; NOLP (screen on) applies the level again
     # (sde_connector.c above). Each switch is logged ("op13: AOD light") to check the threshold.
+    # (anchored on the tables' ends: the reference's tp_fix.py appends Xiaomi's sets after FPS_SWITCH)
     ("display-drivers/msm/dsi/dsi_defs.h",
-     "\tDSI_CMD_SET_FPS_SWITCH,\n\tDSI_CMD_SET_MAX\n};",
-     "\tDSI_CMD_SET_FPS_SWITCH,\n"
+     "\tDSI_CMD_SET_MAX\n};",
      "\tDSI_CMD_SET_K618_AOD_HIGH,\t/* op13: the DT's AOD light modes (scripts/tp_op13_fix.py) */\n"
      "\tDSI_CMD_SET_K618_AOD_LOW,\n"
      "\tDSI_CMD_SET_MAX\n};"),
     ("display-drivers/msm/dsi/dsi_panel.c",
-     '\t"qcom,mdss-dsi-fps-switch-command",\n};',
-     '\t"qcom,mdss-dsi-fps-switch-command",\n'
-     '\t"qcom,mdss-dsi-aod-high-mode-command",\t/* op13 (scripts/tp_op13_fix.py) */\n'
-     '\t"qcom,mdss-dsi-aod-low-mode-command",\n};'),
+     "};\n\nconst char *cmd_set_state_map[DSI_CMD_SET_MAX] = {",
+     "\t\"qcom,mdss-dsi-aod-high-mode-command\",\t/* op13 (scripts/tp_op13_fix.py) */\n"
+     "\t\"qcom,mdss-dsi-aod-low-mode-command\",\n"
+     "};\n\nconst char *cmd_set_state_map[DSI_CMD_SET_MAX] = {"),
     ("display-drivers/msm/dsi/dsi_panel.c",
-     '\t"qcom,mdss-dsi-fps-switch-command-state",\n};',
-     '\t"qcom,mdss-dsi-fps-switch-command-state",\n'
-     '\t"qcom,mdss-dsi-aod-high-mode-command-state",\t/* op13 (scripts/tp_op13_fix.py) */\n'
-     '\t"qcom,mdss-dsi-aod-low-mode-command-state",\n};'),
+     "};\n#endif /* OPLUS_FEATURE_DISPLAY */\n\nint dsi_panel_get_cmd_pkt_count(",
+     "\t\"qcom,mdss-dsi-aod-high-mode-command-state\",\t/* op13 (scripts/tp_op13_fix.py) */\n"
+     "\t\"qcom,mdss-dsi-aod-low-mode-command-state\",\n"
+     "};\n#endif /* OPLUS_FEATURE_DISPLAY */\n\nint dsi_panel_get_cmd_pkt_count("),
     ("display-drivers/msm/dsi/dsi_panel.c",
      "int dsi_panel_set_backlight(struct dsi_panel *panel, u32 bl_lvl)\n{\n\tint rc = 0;\n"
      "\tstruct dsi_backlight_config *bl = &panel->bl_config;\n\n"
