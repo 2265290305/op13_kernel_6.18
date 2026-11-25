@@ -31,6 +31,23 @@ EDITS = [
      "\t\t\t\t\terr, __func__, label);\n"
      "\t\t\treturn err;\n\t\t}\n\t}\n\n"
      "\t/* Validate the label retrieved from DT */\n\tfor (int i = 1; i < FASTRPC_MAX_DSP_TYPE; i++) {\n"),
+    # Display: the OnePlus 13's panels send several command sets (the timing switch of every mode,
+    # PWM switches, AOD PWM) in "dsi_hs_sync1_mode", a state OnePlus' unpublished display extension
+    # parses. Qualcomm's parser (the one built here) rejected it, freed the set's commands but kept
+    # its count, and the first timing switch after the screen came on wrote through the NULL
+    # (test-56: panic in dsi_panel_tx_cmd_set from dsi_panel_switch, the phone froze). That state
+    # is sent as high speed (its "sync1" timing is the extension's), and a set that does not parse
+    # is left empty -- skipped, as one the DT does not define.
+    ("display-drivers/msm/dsi/dsi_panel.c",
+     '\t} else if (!strcmp(state, "dsi_hs_mode")) {\n\t\tcmd->state = DSI_CMD_SET_STATE_HS;\n\t} else {\n',
+     '\t} else if (!strcmp(state, "dsi_hs_mode") ||\n'
+     '\t\t   !strcmp(state, "dsi_hs_sync1_mode")) {\t/* op13: OnePlus\' (scripts/tp_op13_fix.py) */\n'
+     '\t\tcmd->state = DSI_CMD_SET_STATE_HS;\n\t} else {\n'),
+    ("display-drivers/msm/dsi/dsi_panel.c",
+     "error_free_mem:\n\tkfree(cmd->cmds);\n\tcmd->cmds = NULL;\nerror:\n\treturn rc;\n",
+     "error_free_mem:\n\tkfree(cmd->cmds);\n\tcmd->cmds = NULL;\n"
+     "\tcmd->count = 0;\t/* op13: no commands, nothing to send (scripts/tp_op13_fix.py) */\n"
+     "error:\n\treturn rc;\n"),
     # sun_perf_gpuconf has KGSL_USE_SHMEM: android_rvh_shmem_get_folio passes the folio order since
     # 6.12.18 -- in 6.18 too, not only up to 6.13
     ("graphics-kernel/kgsl_sharedmem.c",
