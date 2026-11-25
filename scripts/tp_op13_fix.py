@@ -48,6 +48,68 @@ EDITS = [
      "error_free_mem:\n\tkfree(cmd->cmds);\n\tcmd->cmds = NULL;\n"
      "\tcmd->count = 0;\t/* op13: no commands, nothing to send (scripts/tp_op13_fix.py) */\n"
      "error:\n\treturn rc;\n"),
+    # Brightness: the OnePlus 13's composer sets the panel's level through the connector property
+    # "sync_backlight_level" every frame (test-57: "not have SYNC_BACKLIGHT_LEVEL prop" ~1000 times),
+    # which only OnePlus' unpublished display extension installs and applies (its OnePlus 12
+    # release, LineageOS sm8650-modules sde_encoder.c: oplus_sync_panel_brightness_v2 writes the
+    # value to the backlight device at kickoff). So the level the user picked was lost at every
+    # screen-on and AOD transition (the panel resets it). The property is installed here and
+    # applied with the dirty connector properties: when it changes, and once after each panel
+    # power transition (enable, LP1/LP2 for AOD, NOLP back from it), counted in dsi_panel.c.
+    ("display-drivers/msm/msm_drv.h",
+     "#ifdef OPLUS_FEATURE_DISPLAY\n\t// Prop to store sync panel backlight level\n\tCONNECTOR_PROP_SYNC_BACKLIGHT_LEVEL,\n"
+     "\tCONNECTOR_PROP_SET_OSC_STATUS,\n\tCONNECTOR_PROP_UPDATE_PANEL_APL_VALUE,\n#endif /* OPLUS_FEATURE_DISPLAY */\n",
+     "\t/* op13: always (scripts/tp_op13_fix.py) */\n\t// Prop to store sync panel backlight level\n"
+     "\tCONNECTOR_PROP_SYNC_BACKLIGHT_LEVEL,\n"
+     "\tCONNECTOR_PROP_SET_OSC_STATUS,\n\tCONNECTOR_PROP_UPDATE_PANEL_APL_VALUE,\n"),
+    ("display-drivers/msm/sde/sde_connector.c",
+     "#ifdef OPLUS_FEATURE_DISPLAY\n\t\tmsm_property_install_volatile_range(&c_conn->property_info, \"sync_backlight_level\",\n",
+     "#ifndef OPLUS_FEATURE_DISPLAY\t/* op13: the OnePlus composer's level (scripts/tp_op13_fix.py) */\n"
+     "\t\tmsm_property_install_volatile_range(&c_conn->property_info, \"sync_backlight_level\",\n"
+     "\t\t\t\t0x0, 0, ~0, 0, CONNECTOR_PROP_SYNC_BACKLIGHT_LEVEL);\n#endif\n"
+     "#ifdef OPLUS_FEATURE_DISPLAY\n\t\tmsm_property_install_volatile_range(&c_conn->property_info, \"sync_backlight_level\",\n"),
+    ("display-drivers/msm/sde/sde_connector.c",
+     "#ifdef OPLUS_FEATURE_DISPLAY\n\tcase CONNECTOR_PROP_SYNC_BACKLIGHT_LEVEL:\n"
+     "\t\tmsm_property_set_dirty(&c_conn->property_info, &c_state->property_state, idx);\n",
+     "#ifndef OPLUS_FEATURE_DISPLAY\t/* op13 (scripts/tp_op13_fix.py) */\n\tcase CONNECTOR_PROP_SYNC_BACKLIGHT_LEVEL:\n"
+     "\t\tmsm_property_set_dirty(&c_conn->property_info, &c_state->property_state, idx);\n\t\tbreak;\n#endif\n"
+     "#ifdef OPLUS_FEATURE_DISPLAY\n\tcase CONNECTOR_PROP_SYNC_BACKLIGHT_LEVEL:\n"
+     "\t\tmsm_property_set_dirty(&c_conn->property_info, &c_state->property_state, idx);\n"),
+    ("display-drivers/msm/sde/sde_connector.c",
+     "\t\t\tbacklight_device_set_brightness(c_conn->bl_device, b_lvl);\n\t\t\tbreak;\n"
+     "\t\tdefault:\n\t\t\t/* nothing to do for most properties */\n",
+     "\t\t\tbacklight_device_set_brightness(c_conn->bl_device, b_lvl);\n\t\t\tbreak;\n"
+     "#ifndef OPLUS_FEATURE_DISPLAY\n"
+     "\t\tcase CONNECTOR_PROP_SYNC_BACKLIGHT_LEVEL: {\t/* op13 (scripts/tp_op13_fix.py) */\n"
+     "\t\t\textern u32 k618_panel_power_seq;\n"
+     "\t\t\tstatic u32 k618_bl_applied, k618_seq_seen;\n"
+     "\t\t\tstruct dsi_display *k618_disp = c_conn->connector_type == DRM_MODE_CONNECTOR_DSI ?\n"
+     "\t\t\t\t\t\t\t c_conn->display : NULL;\n"
+     "\t\t\tu32 k618_seq = READ_ONCE(k618_panel_power_seq);\n\n"
+     "\t\t\tb_lvl = sde_connector_get_property(connector->state,\n"
+     "\t\t\t\t\t\tCONNECTOR_PROP_SYNC_BACKLIGHT_LEVEL);\n"
+     "\t\t\tif (!c_conn->bl_device || !k618_disp || !k618_disp->panel ||\n"
+     "\t\t\t    !k618_disp->panel->panel_initialized)\n\t\t\t\tbreak;\n"
+     "\t\t\tif (b_lvl != k618_bl_applied || k618_seq != k618_seq_seen) {\n"
+     "\t\t\t\tbacklight_device_set_brightness(c_conn->bl_device, b_lvl);\n"
+     "\t\t\t\tk618_bl_applied = b_lvl;\n\t\t\t\tk618_seq_seen = k618_seq;\n\t\t\t}\n"
+     "\t\t\tbreak;\n\t\t}\n#endif\n"
+     "\t\tdefault:\n\t\t\t/* nothing to do for most properties */\n"),
+    ("display-drivers/msm/dsi/dsi_panel.c",
+     "int dsi_panel_set_lp1(struct dsi_panel *panel)\n{\n",
+     "/* op13: panel power transitions, after which the composer's level is applied again\n"
+     " * (sde_connector.c, scripts/tp_op13_fix.py) */\n"
+     "u32 k618_panel_power_seq;\n\n"
+     "int dsi_panel_set_lp1(struct dsi_panel *panel)\n{\n\tWRITE_ONCE(k618_panel_power_seq, k618_panel_power_seq + 1);\n"),
+    ("display-drivers/msm/dsi/dsi_panel.c",
+     "int dsi_panel_set_lp2(struct dsi_panel *panel)\n{\n",
+     "int dsi_panel_set_lp2(struct dsi_panel *panel)\n{\n\tWRITE_ONCE(k618_panel_power_seq, k618_panel_power_seq + 1);\n"),
+    ("display-drivers/msm/dsi/dsi_panel.c",
+     "int dsi_panel_set_nolp(struct dsi_panel *panel)\n{\n",
+     "int dsi_panel_set_nolp(struct dsi_panel *panel)\n{\n\tWRITE_ONCE(k618_panel_power_seq, k618_panel_power_seq + 1);\n"),
+    ("display-drivers/msm/dsi/dsi_panel.c",
+     "int dsi_panel_enable(struct dsi_panel *panel)\n{\n",
+     "int dsi_panel_enable(struct dsi_panel *panel)\n{\n\tWRITE_ONCE(k618_panel_power_seq, k618_panel_power_seq + 1);\n"),
     # sun_perf_gpuconf has KGSL_USE_SHMEM: android_rvh_shmem_get_folio passes the folio order since
     # 6.12.18 -- in 6.18 too, not only up to 6.13
     ("graphics-kernel/kgsl_sharedmem.c",
