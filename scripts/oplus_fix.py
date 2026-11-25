@@ -339,6 +339,23 @@ EDITS = [
      "EXPORT_SYMBOL(cnss_pci_get_iova_info);\n\n"
      "int cnss_pci_get_iova_ipa(struct cnss_pci_data *pci_priv, u64 *addr, u64 *size)\n",
      "cnss_pci_get_iova_info"),
+    # the OnePlus 13's charger (oplus_chg_v2) as OnePlus published it does not compile: in
+    # hl7603_hardware_init() the "ic_dev is NULL" check lacks its closing brace, and every function
+    # after it was "not allowed here" -- so the OnePlus 15's charger was used (its copy has the brace)
+    ("charger_ic/oplus_hal_hl7603.c",
+     "\t\tchg_err(\"chip->ic_dev is NULL\\n\");\n\t\treturn 0;\n\t\n\trc = hl7603_read(chip, DEV_ID_REV_REG,",
+     "\t\tchg_err(\"chip->ic_dev is NULL\\n\");\n\t\treturn 0;\n\t}\t/* op13: the brace OnePlus' source lacks (scripts/oplus_fix.py) */\n\n\trc = hl7603_read(chip, DEV_ID_REV_REG,"),
+    # the OnePlus 13's btfm_slim_codec (OnePlus' BT timeout/init-error counters, which the OnePlus
+    # 15's copy lacks) ends its slimbus ID table without the empty entry: 6.18's modpost refuses it
+    # ("btfm_slim_id[] is not terminated with a NULL entry"), and a match would read past it
+    ("bt-kernel/slimbus/btfm_slim.c",
+     "\t.prod_code = 0x220,\n\t.dev_index = 0x1,\n\t.instance = 0x0,\n\t}\n};\n",
+     "\t.prod_code = 0x220,\n\t.dev_index = 0x1,\n\t.instance = 0x0,\n\t},\n"
+     "\t{ }\t/* op13: the table's end (scripts/oplus_fix.py) */\n};\n"),
+    # kp_freeze_detect's trace event lacks a ';' after one __assign_str() (6.6's macro was a block)
+    ("kp_freeze_detect/kp_freeze_trace.h",
+     "\t\t__assign_str(event_id)\n\t\t__assign_str(comm);\n",
+     "\t\t__assign_str(event_id);\t/* op13: the missing ';' (scripts/oplus_fix.py) */\n\t\t__assign_str(comm);\n"),
     # nxp-nci asks an unpublished OnePlus module for the NFC chip's ID (get_nfc_id); OnePlus' own
     # earlier way, left commented out under it, reads the ID GPIO in this driver
     ("nfc/i2c_drv.c",
