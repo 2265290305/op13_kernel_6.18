@@ -226,6 +226,12 @@ EDITS = [
      "#ifndef CONFIG_DISABLE_OPLUS_FUNCTION\n#include <soc/oplus/system/oplus_project.h>",
      "#ifndef CONFIG_OPLUS_SYSTEM_KERNEL_QCOM\t/* op13: scripts/oplus_fix.py */\n#define CONFIG_OPLUS_SYSTEM_KERNEL_QCOM 1\n#endif\n"
      "#ifndef CONFIG_DISABLE_OPLUS_FUNCTION\n#include <soc/oplus/system/oplus_project.h>"),
+    # locking_strategy keeps its per-mutex count in struct mutex's OEM data: an array (u64[2]) in
+    # 6.6/6.12, so lock->android_oem_data1 was its address; one u64 in 6.18, so the same cast read
+    # the value (0) as the pointer and every contended mutex oopsed (test-54 boot-full, deadlocked)
+    ("synchronize/mutex.h",
+     "return (struct oplus_mutex *)lock->android_oem_data1;",
+     "return (struct oplus_mutex *)&lock->android_oem_data1;\t/* op13: a u64 in 6.18 (scripts/oplus_fix.py) */"),
     # locking_strategy's rwsem.c keeps its own rwsem_owner()/is_rwsem_reader_owned(), which 6.18's
     # linux/rwsem.h now declares (non-static): its copies under their own names
     ("rwsem.c",
