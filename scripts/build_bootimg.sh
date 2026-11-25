@@ -52,7 +52,7 @@ BASE="printk.devkmsg=on log_buf_len=16M sysctl.kernel.panic_on_oops=0 panic=5 in
 # that background probe, and when it oopsed (test-31) the boot stopped there for good.
 # oplus_bsp_synaptics_tcm2.async_probe=1 (k618_load hands it to the module) sets the module's
 # async_probe_requested, which skips that wait
-CMDLINE=${CMDLINE:-op13_modload_tolerate=1 op13_deadline=180 op13_hold_reboot=1 driver_async_probe=synaptics_tcm_spi,synaptics_tcm_hbp oplus_bsp_synaptics_tcm2.async_probe=1 $BASE panic=0}
+CMDLINE=${CMDLINE:-op13_modload_tolerate=1 op13_deadline=60 op13_hold_reboot=1 driver_async_probe=synaptics_tcm_spi,synaptics_tcm_hbp oplus_bsp_synaptics_tcm2.async_probe=1 $BASE panic=0}
 [ -f "$O/Module.symvers" ] || { echo "build_bootimg: build the kernel first"; exit 1; }
 # an image without the SoC modules cannot get past the first stage: none at all, rather than one
 # that only looks testable

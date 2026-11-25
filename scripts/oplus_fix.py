@@ -226,6 +226,20 @@ EDITS = [
      "#ifndef CONFIG_DISABLE_OPLUS_FUNCTION\n#include <soc/oplus/system/oplus_project.h>",
      "#ifndef CONFIG_OPLUS_SYSTEM_KERNEL_QCOM\t/* op13: scripts/oplus_fix.py */\n#define CONFIG_OPLUS_SYSTEM_KERNEL_QCOM 1\n#endif\n"
      "#ifndef CONFIG_DISABLE_OPLUS_FUNCTION\n#include <soc/oplus/system/oplus_project.h>"),
+    # charger v2's chg_err: each call site at most 3 lines per 10 s. Its init works retry every
+    # 100 ms until the ADSP's gauge/buck appear (second stage) and printed 2 errors each time, which
+    # overwrote pstore's whole 160 KB ring in ~40 s (test-55: the stuck first stage's log lost)
+    ("v2/include/oplus_chg.h",
+     '#define chg_err(fmt, ...)                                                      \\\n'
+     '\t({                                                                     \\\n'
+     '\t\tif (oplus_log_level >= LOG_LEVEL_ERR)                          \\\n'
+     '\t\t\tprintk(KERN_ERR "[ERROR]: OPLUS_CHG" pr_fmt(fmt),      \\\n',
+     '/* op13: rate-limited per call site (scripts/oplus_fix.py) */\n'
+     '#define chg_err(fmt, ...)                                                      \\\n'
+     '\t({                                                                     \\\n'
+     '\t\tstatic DEFINE_RATELIMIT_STATE(k618_chg_rs, 10 * HZ, 3);       \\\n'
+     '\t\tif (oplus_log_level >= LOG_LEVEL_ERR && __ratelimit(&k618_chg_rs)) \\\n'
+     '\t\t\tprintk(KERN_ERR "[ERROR]: OPLUS_CHG" pr_fmt(fmt),      \\\n'),
     # locking_strategy keeps its per-mutex count in struct mutex's OEM data: an array (u64[2]) in
     # 6.6/6.12, so lock->android_oem_data1 was its address; one u64 in 6.18, so the same cast read
     # the value (0) as the pointer and every contended mutex oopsed (test-54 boot-full, deadlocked)

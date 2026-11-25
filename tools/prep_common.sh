@@ -382,7 +382,7 @@ fi
 
 # op13_deadline=<seconds>: a boot that has not started zygote by then logs where every blocked task
 # waits and every CPU's stack, for the ramoops log a Power+VolUp reset keeps. Once zygote has run,
-# it does nothing.
+# it does nothing. It repeats every 60 s (5 more times), so the newest dump is at the ring's end.
 PA=$C/kernel/panic.c
 if ! grep -q 'op13_deadline' $PA; then
 	cat >> $PA <<'EOF'
@@ -430,6 +430,8 @@ static void op13_show_boot_tasks(void)
 	rcu_read_unlock();
 }
 
+static unsigned int op13_deadline_runs;
+
 static void op13_deadline_fn(struct work_struct *work)
 {
 	if (op13_zygote_seen()) {
@@ -438,13 +440,17 @@ static void op13_deadline_fn(struct work_struct *work)
 	}
 	console_verbose();	/* the task dump is KERN_INFO: past the bootloader's loglevel */
 	pr_emerg("op13: no zygote %u s into the boot: blocked tasks and CPUs follow\n",
-		 op13_deadline);
+		 op13_deadline + 60 * op13_deadline_runs);
 	show_state_filter(TASK_UNINTERRUPTIBLE);
 	op13_show_boot_tasks();
 	trigger_all_cpu_backtrace();
 	/* no panic: it stops the CPUs, the unfed watchdog then resets the phone and the log is lost
 	 * (test-24); left running, a Power+VolUp reset keeps it (test-21) */
 	pr_emerg("op13: boot deadline (%u s) reached: reset with Power+VolUp\n", op13_deadline);
+	/* again every 60 s while there is no zygote: the newest dump stays at the end of pstore's
+	 * ring, the part a full ring still has (test-55: its lines were overwritten) */
+	if (++op13_deadline_runs < 6)
+		queue_delayed_work(system_highpri_wq, to_delayed_work(work), 60 * HZ);
 }
 static DECLARE_DELAYED_WORK(op13_deadline_work, op13_deadline_fn);
 

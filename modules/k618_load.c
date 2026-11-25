@@ -9,6 +9,7 @@
 #include <linux/sched/clock.h>
 #include <linux/slab.h>
 #include <linux/string.h>
+#include <linux/workqueue.h>
 
 static char list_path[128] = "/lib/modules/k618_batch.load";
 module_param_string(list, list_path, sizeof(list_path), 0444);
@@ -27,6 +28,28 @@ extern unsigned int k618_probe_flush(unsigned int spin_ms);
 static unsigned int (*flush)(unsigned int);
 
 static unsigned int n_loaded, n_refused, n_died, n_noloader;
+
+/*
+ * op13: the module being loaded, for a watcher that names it every 10 s while its load takes
+ * longer: those lines are the newest in pstore's ring, the part a full ring still has (test-55
+ * stopped in the first stage, and the "trying" line of the module it waited on was overwritten)
+ */
+static const char *cur_name;
+static unsigned int cur_n, cur_total;
+static unsigned long long cur_t0;
+
+static unsigned long long now_ms(void);
+static void watch_fn(struct work_struct *work)
+{
+	const char *name = READ_ONCE(cur_name);
+	unsigned long long ms = now_ms() - READ_ONCE(cur_t0);
+
+	if (name && ms >= 10000)
+		pr_emerg("k618_load: %u/%u %s: still loading (%llu s)\n", cur_n, cur_total, name,
+			 ms / 1000);
+	queue_delayed_work(system_highpri_wq, to_delayed_work(work), 10 * HZ);
+}
+static DECLARE_DELAYED_WORK(watch_work, watch_fn);
 
 static unsigned long long now_ms(void)
 {
@@ -150,6 +173,10 @@ static void load_one(const char *name, unsigned int n, unsigned int total)
 	if (flush && flush_ms)
 		flush(flush_ms);
 	t0 = now_ms();
+	cur_n = n;
+	cur_total = total;
+	WRITE_ONCE(cur_t0, t0);
+	WRITE_ONCE(cur_name, name);
 	/*
 	 * UMH_WAIT_PROC: the child is waited for, so the modules go in one at a time and in order.
 	 * ret is the child's exit status (0 loaded, 1 finit_module refused it, 2..4 it could not
@@ -157,6 +184,7 @@ static void load_one(const char *name, unsigned int n, unsigned int total)
 	 * module that faults in its init() looks like from here.
 	 */
 	ret = call_usermodehelper(helper, argv, (char **)envp, UMH_WAIT_PROC);
+	WRITE_ONCE(cur_name, NULL);
 	/* a wait status: (exit code << 8) | the signal that killed it; or < 0, nothing ran */
 	if (ret == 0) {
 		n_loaded++;
@@ -217,6 +245,7 @@ static int __init k618_load_init(void)
 		 now_ms());
 	if (delay_ms)
 		msleep(delay_ms);
+	queue_delayed_work(system_highpri_wq, &watch_work, 10 * HZ);
 	p = buf;
 	while ((line = strsep(&p, "\n"))) {
 		if (!*line)
@@ -227,6 +256,7 @@ static int __init k618_load_init(void)
 			break;
 		}
 	}
+	cancel_delayed_work_sync(&watch_work);
 	pr_emerg("k618_load: done: %u loaded, %u refused, %u died, %u not tried of %u, at %llu ms\n",
 		 n_loaded, n_refused, n_died, n_noloader, total, now_ms());
 	kfree(buf);
