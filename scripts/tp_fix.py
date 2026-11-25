@@ -28,6 +28,12 @@ SKIP_FILES = ("securemsm-kernel/include/uapi/linux/smcinvoke.h", "securemsm-kern
               # (test-48). The OnePlus 13's DT (a 6.6 one) has the path names 6.5+ needs.
               "camera-kernel/drivers/cam_utils/cam_soc_icc.c")
 SKIP_GENERATED = ("display-drivers/msm/mi_disp_k618.c", "display-drivers/msm/mi_disp_k618.h")
+# edits that set a field only some trees' structs have: applied only where the given header declares
+# it. The reference's 6.12 camera bus description has ubwc_clients_mask, the OnePlus 13's 6.6
+# camera tree does not: there it broke the build, and the OnePlus 15's camera driver was used, whose
+# interface the OnePlus 13's CamX does not speak (test-57: camera black, the provider stuck)
+NEEDS_FIELD = {"ubwc_clients_mask":
+               "camera-kernel/drivers/cam_isp/isp_hw_mgr/isp_hw/vfe_hw/vfe_bus/cam_vfe_bus_ver3.h"}
 SKIP_REPOS = ("video-driver-515", "eva-kernel-515")
 
 
@@ -91,6 +97,12 @@ def main(argv):
             continue
         path = os.path.join(root, rel)
         if not os.path.exists(path):
+            continue
+        need = [(f, h) for f, h in NEEDS_FIELD.items() if f in new and f not in old]
+        if any(not os.path.exists(os.path.join(root, h)) or
+               f not in open(os.path.join(root, h), encoding="utf-8", errors="surrogateescape").read()
+               for f, h in need):
+            skipped += 1
             continue
         text = open(path, encoding="utf-8", errors="surrogateescape").read()
         # the reference's idempotency rules (k618_tp_fix.py main())

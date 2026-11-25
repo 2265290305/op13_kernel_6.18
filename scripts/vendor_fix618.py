@@ -74,6 +74,22 @@ def wrap_external_remove(text, path):
 	return text
 
 
+# comments and string literals, which a rewrite of code leaves alone
+_NONCODE = re.compile(r'/\*.*?\*/|//[^\n]*|"(?:\\.|[^"\\\n])*"|\'(?:\\.|[^\'\\\n])*\'', re.S)
+
+
+def sub_code(pattern, repl, text):
+	"""re.sub on the code only: a "return ...;" in a comment is not a statement (test-57: msm_vidc's
+	remove() comment "It return immediately ... ;" was rewritten with the code after it)."""
+	out, pos = [], 0
+	for m in _NONCODE.finditer(text):
+		out.append(re.sub(pattern, repl, text[pos:m.start()]))
+		out.append(m.group(0))
+		pos = m.end()
+	out.append(re.sub(pattern, repl, text[pos:]))
+	return "".join(out)
+
+
 def fix_platform_remove(text, path):
 	text = wrap_external_remove(text, path)
 	names = set(re.findall(r"\.remove\s*=\s*(?:__exit_p\(\s*)?(\w+)", text))
@@ -97,8 +113,8 @@ def fix_platform_remove(text, path):
 				continue
 			b0, b1 = body
 			inner = text[b0:b1 + 1]
-			inner = re.sub(r"\breturn\s+0\s*;", "return;", inner)
-			inner = re.sub(r"\breturn\s+([^;]+);", lambda r: "{ (void)(%s); return; }" % r.group(1).strip()
+			inner = sub_code(r"\breturn\s+0\s*;", "return;", inner)
+			inner = sub_code(r"\breturn\s+([^;]+);", lambda r: "{ (void)(%s); return; }" % r.group(1).strip()
 				if r.group(1).strip() else "return;", inner)
 			new.append(text[pos:m.start()] + proto(m) + text[end:b0] + inner)
 			pos = b1 + 1

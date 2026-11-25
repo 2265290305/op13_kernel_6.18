@@ -235,6 +235,60 @@ EDITS = [
      "\t\tmaps = of_translate_dma_region(pci_dev->dev.of_node, maps,\n\t\t\t\t\t       &iova, &length);\n"
      "\t\tif (!maps) {\t/* op13: does not translate (scripts/oplus_fix.py) */\n"
      "\t\t\tof_node_put(of_node);\n\t\t\treturn -EINVAL;\n\t\t}\n"),
+    # The OnePlus 13's EVA (camera vision engine), video and camera drivers have to be its own: CamX
+    # and the media stack speak their interfaces. Two 6.18 changes kept EVA and video from building
+    # (the OnePlus 15's were used, test-57: camera black, the provider stuck in CamX's open).
+    # EVA looks a dma-buf fd up in its client's file table: files_lookup_fd_rcu() and the old
+    # get_file_rcu() are gone; the same with 6.18's helpers (as fs/file.c's __fget_files_rcu: take
+    # a reference, then check the slot still holds that file)
+    ("eva/msm_cvp_buf.c",
+     "loop:\n#if (LINUX_VERSION_CODE < KERNEL_VERSION(5, 13, 0))\n\tfile = fcheck_files(files, fd);\n#else\n"
+     "\tfile = files_lookup_fd_rcu(files, fd);\n#endif\n\tif (file) {\n"
+     "\t\t/* File object ref couldn't be taken.\n"
+     "\t\t * dup2() atomicity guarantee is the reason\n"
+     "\t\t * we loop to catch the new file (or NULL pointer)\n\t\t */\n"
+     "\t\tif (file->f_mode & mask)\n\t\t\tfile = NULL;\n"
+     "\t\telse if (!get_file_rcu(file))\n\t\t\tgoto loop;\n\t}\n",
+     "loop:\n"
+     "\t/* op13: 6.18's lookup, as fs/file.c's __fget_files_rcu (scripts/oplus_fix.py) */\n"
+     "\tfile = files_lookup_fd_raw(files, fd);\n"
+     "\tif (file && (file->f_mode & mask)) {\n\t\tfile = NULL;\n"
+     "\t} else if (file) {\n"
+     "\t\tif (!file_ref_get(&file->f_ref))\n\t\t\tgoto loop;\n"
+     "\t\tif (unlikely(files_lookup_fd_raw(files, fd) != file)) {\n"
+     "\t\t\tfput(file);\n\t\t\tgoto loop;\n\t\t}\n\t}\n"),
+    # video: devm_pm_opp_attach_genpd() is gone (6.13): the rails' power domains attached and linked
+    # with devm_pm_domain_attach_list(), as the OnePlus 15's driver does
+    ("vidc/src/resources.c",
+     "\t/* populate opp power domains(for rails) */\n"
+     "\trc = devm_pm_opp_attach_genpd(&core->pdev->dev, opp_tbl, &opp_vdevs);\n"
+     "\trc = -EINVAL;\n\tif (rc)\n\t\treturn rc;\n\n"
+     "\t/* create device_links b/w consumer(dev) and multiple suppliers(mx, mmcx) */\n"
+     "\tfor (cnt = 0; cnt < opp_count; cnt++) {\n"
+     "\t\trc = devm_opp_dl_get(&core->pdev->dev, opp_vdevs[cnt]);\n"
+     "\t\tif (rc) {\n"
+     "\t\t\td_vpr_e(\"%s: failed to create dl: %s\\n\",\n"
+     "\t\t\t\t__func__, dev_name(opp_vdevs[cnt]));\n"
+     "\t\t\treturn rc;\n\t\t}\n\t}\n",
+     "#if (KERNEL_VERSION(6, 13, 0) <= LINUX_VERSION_CODE)\t/* op13 (scripts/oplus_fix.py) */\n"
+     "\t{\n"
+     "\t\tstruct dev_pm_domain_attach_data k618_pd = {\n"
+     "\t\t\t.pd_names = opp_tbl,\n\t\t\t.num_pd_names = opp_count,\n"
+     "\t\t\t.pd_flags = PD_FLAG_DEV_LINK_ON,\n\t\t};\n"
+     "\t\tstruct dev_pm_domain_list *k618_pds;\n\n"
+     "\t\trc = devm_pm_domain_attach_list(&core->pdev->dev, &k618_pd, &k618_pds);\n"
+     "\t\tif (rc < 0)\n\t\t\treturn rc;\n\t\trc = 0;\n\t}\n"
+     "#else\n"
+     "\t/* populate opp power domains(for rails) */\n"
+     "\trc = devm_pm_opp_attach_genpd(&core->pdev->dev, opp_tbl, &opp_vdevs);\n"
+     "\trc = -EINVAL;\n\tif (rc)\n\t\treturn rc;\n\n"
+     "\t/* create device_links b/w consumer(dev) and multiple suppliers(mx, mmcx) */\n"
+     "\tfor (cnt = 0; cnt < opp_count; cnt++) {\n"
+     "\t\trc = devm_opp_dl_get(&core->pdev->dev, opp_vdevs[cnt]);\n"
+     "\t\tif (rc) {\n"
+     "\t\t\td_vpr_e(\"%s: failed to create dl: %s\\n\",\n"
+     "\t\t\t\t__func__, dev_name(opp_vdevs[cnt]));\n"
+     "\t\t\treturn rc;\n\t\t}\n\t}\n#endif\n"),
     # charger v2's chg_err: each call site at most 3 lines per 10 s. Its init works retry every
     # 100 ms until the ADSP's gauge/buck appear (second stage) and printed 2 errors each time, which
     # overwrote pstore's whole 160 KB ring in ~40 s (test-55: the stuck first stage's log lost)
