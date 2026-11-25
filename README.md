@@ -15,10 +15,10 @@ An Android common kernel **6.18** port for the **OnePlus 13** (Snapdragon 8 Elit
 
 | | |
 |:--|:--|
-| Works | Boot to ColorOS, display and touch, GPU, adb, Wi-Fi, fingerprint (FOD) |
-| Partly | Brightness (set from settings; kept across screen-on/AOD transitions from test-58), the display sometimes stops updating |
-| Not yet | Camera (and with it face unlock and the flashlight), root (KernelSU goes into the kernel once it is stable) |
-| Not built | WALT and what needs it, OnePlus' zsmalloc fork (hybridswap, zram tuning), GEAS, and modules OnePlus has not published |
+| Works | Boot to ColorOS, display and touch, GPU, adb, Wi-Fi, fingerprint (FOD), camera, flashlight and face unlock (test-58) |
+| Partly | Brightness: set from settings and kept across screen-on/AOD; OnePlus' unpublished display extension is missing, so its extras are too (the panel's PWM mode switch at low brightness, `/dev/oplus_display`); AOD picks the panel's own AOD-high/low level from the requested brightness (test-59). The display sometimes stops updating |
+| Root | KernelSU built in: [BakaSU](https://github.com/Baka-SU/BakaSU), pinned in [`scripts/fetch.sh`](scripts/fetch.sh) (test-59) |
+| Not built | WALT and what needs it (until it is, the vendor's switch to the `walt` CPU governor gets `schedutil`), OnePlus' zsmalloc fork (hybridswap, zram tuning), GEAS, and modules OnePlus has not published |
 
 Each release's notes say what changed and what is known to be broken.
 
@@ -46,6 +46,10 @@ bash scripts/build_soc.sh    # SoC modules for sun -> src/soc/**/*.ko
 ```
 
 [`tools/remote_payload.py`](tools/remote_payload.py) pulls single partitions out of an OTA zip over HTTP without downloading the whole package (`list`, or `extract OUTDIR boot vendor_boot ...`).
+
+## Root
+
+KernelSU is part of the kernel (BakaSU, its tracepoint hooks; nothing to patch in `init_boot`). Install the BakaSU manager app from its [releases](https://github.com/Baka-SU/BakaSU/releases), matching the version the release notes name. A KernelSU module (LKM) built for the stock 6.6 kernel cannot load on 6.18; an `init_boot` patched with one is not needed for root here (it still roots the stock kernel).
 
 ## Testing
 
@@ -81,6 +85,7 @@ The log is a 256 KB ring (the stock kernel's layout, so the stock kernel can rea
 - **[JiaqiLi404/android_kernel_618_for_sm8550](https://github.com/JiaqiLi404/android_kernel_618_for_sm8550)** — the Xiaomi 13 Pro (SM8550) 6.18 port this project is based on: its 6.12 → 6.18 SoC integration, the vendor-module build approach, the GKI edits and the boot-image method are reused here.
 - **[OnePlusOSS](https://github.com/OnePlusOSS)** — [android_kernel_oneplus_sm8850](https://github.com/OnePlusOSS/android_kernel_oneplus_sm8850), [android_kernel_modules_and_devicetree_oneplus_sm8850](https://github.com/OnePlusOSS/android_kernel_modules_and_devicetree_oneplus_sm8850) and [android_kernel_modules_and_devicetree_oneplus_sm8750](https://github.com/OnePlusOSS/android_kernel_modules_and_devicetree_oneplus_sm8750).
 - **[LineageOS/android_kernel_oneplus_sm8650-modules](https://github.com/LineageOS/android_kernel_oneplus_sm8650-modules)** — OnePlus' published display extension for the OnePlus 12, read for how the composer's brightness property is meant to work (the OnePlus 13's is not published).
+- **[Baka-SU/BakaSU](https://github.com/Baka-SU/BakaSU)** — the KernelSU built into the kernel.
 - **Qualcomm** — the SoC and techpack drivers in those trees.
 - **Google** — [Android Common Kernel](https://android.googlesource.com/kernel/common), [clang prebuilts](https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86) and [mkbootimg](https://android.googlesource.com/platform/system/tools/mkbootimg).
 - **[palazik/android_kernel_common_oneplus_sm8750](https://github.com/palazik/android_kernel_common_oneplus_sm8750)** — the OnePlus 13 6.6 kernel this port starts from.
