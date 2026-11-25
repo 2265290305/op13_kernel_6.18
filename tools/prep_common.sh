@@ -650,6 +650,34 @@ PY
 	echo "napi: a NAPI never added is deleted/disabled as in 6.6"
 fi
 
+# The governor "walt" is schedutil here. The stock vendor_boot command line boots with
+# cpufreq.default_governor=performance, and the vendor's post-boot script switches every policy to
+# "walt" (Qualcomm's WALT, which this kernel does not build). That write failed, so every core
+# stayed at its highest frequency for good: the phone ran warm doing nothing (test-58). A write
+# of "walt" now gets the scheduler-driven governor the kernel has.
+CF=$C/drivers/cpufreq/cpufreq.c
+if ! grep -q 'op13: "walt" is schedutil' $CF; then
+	python3 -I - "$CF" <<'PY'
+import sys
+p = sys.argv[1]
+t = open(p).read()
+old = ("\tif (request_module(\"cpufreq_%s\", str_governor))\n\t\treturn NULL;\n\n"
+       "\treturn get_governor(str_governor);\n}\n")
+new = ("\tif (!request_module(\"cpufreq_%s\", str_governor)) {\n"
+       "\t\tt = get_governor(str_governor);\n\t\tif (t)\n\t\t\treturn t;\n\t}\n\n"
+       "\t/* op13: \"walt\" is schedutil -- WALT is not built, and the vendor's post-boot\n"
+       "\t * script asks for it to leave the boot-time \"performance\" (tools/prep_common.sh) */\n"
+       "\tif (!strcasecmp(str_governor, \"walt\")) {\n"
+       "\t\tpr_info_once(\"cpufreq: governor walt requested, using schedutil\\n\");\n"
+       "\t\treturn get_governor(\"schedutil\");\n\t}\n"
+       "\treturn NULL;\n}\n")
+assert t.count(old) == 1, "cpufreq_parse_governor"
+open(p, "w").write(t.replace(old, new, 1))
+PY
+	grep -q 'op13: "walt" is schedutil' $CF || { echo "cpufreq walt: edit failed"; exit 1; }
+	echo "cpufreq: governor walt -> schedutil"
+fi
+
 # a 4096-byte command line: the bootloader appends its own (msm_drm.dsi_display0=<panel>,
 # oplus_bsp_tp_custom.dsi_display0=<panel> ...) after the boot image's, and with ours the whole was
 # cut at 2048 (test-46: 2045 bytes kept, oplus_bsp_tp_custom.dsi_display0 gone -- the touch driver
