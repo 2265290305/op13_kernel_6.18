@@ -431,19 +431,24 @@ for round in 1 2; do
 	cat $SYMS "$O/Module.symvers" "$S/Module.symvers" 2>/dev/null | awk '{ print $2 }' | sort -u > "$W/exported.txt"
 	ls "$OUTM" "$HAVE" 2>/dev/null | sed -n 's/\.ko$//p' | sort -u > "$W/built.txt"
 	again=0
+	echo "second chance round $round: $(wc -l < "$W/exported.txt") symbols exported, $(wc -l < "$W/built.txt") modules built; passes: $P1 ${P2:-}" >> "$LOG/retry.txt"
 	for P in "$P1" ${P2:+"$P2"}; do
+		[ -f "$P/failed" ] || echo "second chance: no $P/failed" >> "$LOG/retry.txt"
 		[ -f "$P/failed" ] && [ -f "$P/levels.txt" ] || continue
 		while read -r name; do
 			pkg=; base=; needs=
 			IFS='|' read -r _l _n pkg base needs < <(awk -F'|' -v n="$name" '$2 == n' "$P/levels.txt") || true
-			[ -n "$pkg" ] || continue
+			[ -n "$pkg" ] || { echo "second chance: $name: not in $(basename "$P")'s plan" >> "$LOG/retry.txt"; continue; }
 			grep -qx "$base" "$W/built.txt" && continue
 			L=$LOG/$(basename "$P")-$name.log
 			if [ -f "$L" ]; then
-				grep -q '^ERROR: modpost: .* undefined!' "$L" || continue
-				grep -qE ': (fatal )?error: ' "$L" && continue
+				grep -q '^ERROR: modpost: .* undefined!' "$L" || { echo "second chance: $name: not a link failure" >> "$LOG/retry.txt"; continue; }
+				grep -qE ': (fatal )?error: ' "$L" && { echo "second chance: $name: compile errors" >> "$LOG/retry.txt"; continue; }
 				sed -n -E 's/^ERROR: modpost: "([^"]+)" .* undefined!/\1/p' "$L" | sort -u > "$W/need.txt"
-				[ -z "$(comm -23 "$W/need.txt" "$W/exported.txt")" ] || continue
+				if [ -n "$(comm -23 "$W/need.txt" "$W/exported.txt")" ]; then
+					echo "second chance: $name: still missing $(comm -23 "$W/need.txt" "$W/exported.txt" | head -3 | tr '\n' ' ')" >> "$LOG/retry.txt"
+					continue
+				fi
 			else
 				# left out: all it needs built by now
 				missing=0

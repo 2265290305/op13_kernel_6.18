@@ -246,6 +246,16 @@ EDITS = [
      "int cnss_get_wlan_tsf_gpio(struct device *dev)\n{\n\treturn -EINVAL;\n}\n"
      "EXPORT_SYMBOL(cnss_get_wlan_tsf_gpio);\n",
      "cnss_set_host_param"),
+    # ... and kiwi's qcacld also asks for the PCIe IOVA range by device, as the OnePlus 15's cnss2
+    # exports it (the same wrapper over cnss_pci_get_iova(), which this cnss2 has)
+    ("cnss2/pci.c",
+     "int cnss_pci_get_iova_ipa(struct cnss_pci_data *pci_priv, u64 *addr, u64 *size)\n",
+     "/* op13: as the OnePlus 15's cnss2 (scripts/oplus_fix.py) */\n"
+     "int cnss_pci_get_iova_info(struct device *dev, u64 *addr, u64 *size)\n{\n"
+     "\treturn cnss_pci_get_iova(cnss_get_pci_priv(to_pci_dev(dev)), addr, size);\n}\n"
+     "EXPORT_SYMBOL(cnss_pci_get_iova_info);\n\n"
+     "int cnss_pci_get_iova_ipa(struct cnss_pci_data *pci_priv, u64 *addr, u64 *size)\n",
+     "cnss_pci_get_iova_info"),
 ]
 
 
