@@ -62,8 +62,15 @@ for n, (d, opt) in sorted(found.items()):
 		mf = os.path.join(TREE, d, f)
 		if os.path.isfile(mf):
 			mt = open(mf, errors="ignore").read().replace("\\\n", " ")
-			for pm in re.finditer(r"^\s*([\w-]+)-\$\((CONFIG_\w+)\)\s*[:+]?=", mt, re.M):
-				if norm(pm.group(1)) == n:
+			for pm in re.finditer(r"^\s*([\w-]+)-\$\((CONFIG_\w+)\)\s*[:+]?=(.*)$", mt, re.M):
+				if norm(pm.group(1)) != n:
+					continue
+				# not a part whose source OnePlus did not publish (schedinfo's perf_schedinfo.c:
+				# "No rule to make target 'perf_schedinfo.o'" cost the whole module)
+				parts = [o[:-2] for o in pm.group(3).split() if o.endswith(".o")]
+				if all(any(os.path.exists(os.path.join(TREE, d, o + x)) for x in (".c", ".S", ""))
+						or re.search(r"^\s*%s-(?:y|objs)\s*[:+]?=" % re.escape(os.path.basename(o)), mt, re.M)
+						for o in parts):
 					e[0].add(pm.group(2))
 with open(PLAN, "w") as p:
 	for d, (opts, names) in sorted(bydir.items()):
