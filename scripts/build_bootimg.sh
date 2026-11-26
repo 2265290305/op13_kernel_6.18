@@ -78,7 +78,7 @@ chmod 755 "$T/rd/k618_umh"
 # modules_install (already stripped and signed), where no vendor module has the same name
 K=$T/mods/lib/modules/$REL/kernel
 SIGN() { "$O/scripts/sign-file" sha256 "$O/certs/signing_key.pem" "$O/certs/signing_key.x509" "$1"; }
-for f in $(find "$S" -name '*.ko') "$ROOT"/out/tpmods/*.ko "$ROOT"/out/oplusmods/*.ko "$ROOT"/out/extramods/*.ko "$ROOT"/out/vendormods/*.ko "$B"/helpers/*.ko; do
+for f in $(find "$S" -name '*.ko') "$ROOT"/out/tpmods/*.ko "$ROOT"/out/oplusmods/*.ko "$ROOT"/out/extramods/*.ko "$ROOT"/out/vendormods/*.ko "$ROOT"/out/waltmods/*.ko "$B"/helpers/*.ko; do
 	[ -f "$f" ] || continue
 	llvm-strip --strip-debug -o "$K/$(basename "$f")" "$f"
 	SIGN "$K/$(basename "$f")"
@@ -109,12 +109,13 @@ echo "build_bootimg: $vendor_n vendor modules, $gki_n of the kernel's own"
 
 # the kernel's built-in module lists: modprobe takes a dependency on a built-in driver as met
 cp "$O/modules.builtin" "$O/modules.builtin.modinfo" "$T/mods/lib/modules/$REL/"
-# the drivers new to the boot -- those scripts/build_vendor.sh brought over and the SoC modules
-# built only since build_soc.sh sets the options sun_perf leaves off (out/soc-forced.txt): in
-# boot.img's layer unloaded, loaded last in boot-full.img's (mklists.py). One whose symbol versions
-# differ is left out with what needs it, instead of costing the image (below)
+# the drivers new to the boot -- those scripts/build_vendor.sh brought over, WALT (build_walt.sh:
+# the scheduler modules it needs are among build_vendor.sh's) and the SoC modules built only since
+# build_soc.sh sets the options sun_perf leaves off (out/soc-forced.txt): in boot.img's layer
+# unloaded, loaded last in boot-full.img's (mklists.py). One whose symbol versions differ is left out
+# with what needs it, instead of costing the image (below)
 NEW=$B/vendormods.list
-cat "$ROOT/out/vendormods.list" "$ROOT/out/soc-forced.txt" 2>/dev/null | sort -u > "$NEW" || : > "$NEW"
+cat "$ROOT/out/vendormods.list" "$ROOT/out/waltmods.list" "$ROOT/out/soc-forced.txt" 2>/dev/null | sort -u > "$NEW" || : > "$NEW"
 # boot.img holds the new ones, less those both images load (device/op13/boot-load.txt)
 NEW_BOOT=$B/vendormods-held.list
 grep -vxF -f <(sed -e 's/#.*//' -e '/^[[:space:]]*$/d' "$ROOT/device/op13/boot-load.txt" 2>/dev/null) "$NEW" > "$NEW_BOOT" \

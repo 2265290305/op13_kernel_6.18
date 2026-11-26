@@ -356,6 +356,14 @@ EDITS = [
     ("kp_freeze_detect/kp_freeze_trace.h",
      "\t\t__assign_str(event_id)\n\t\t__assign_str(comm);\n",
      "\t\t__assign_str(event_id);\t/* op13: the missing ';' (scripts/oplus_fix.py) */\n\t\t__assign_str(comm);\n"),
+    # WALT's governor (sched-walt, scripts/build_walt.sh) sets up cpufreq_bouncing for each policy it
+    # takes over (cb_stuff_init(), as the OnePlus 15's copy exports it; the OnePlus 13's has the same
+    # function, guarded against a second call, without the export)
+    ("cpufreq_bouncing/cpufreq_bouncing.c",
+     "\t\tinit_complete = true;\n\t}\n}\n\n\nstatic int cpufreq_bouncing_register_callback(",
+     "\t\tinit_complete = true;\n\t}\n}\nEXPORT_SYMBOL_GPL(cb_stuff_init);\t/* op13: for WALT (scripts/oplus_fix.py) */\n\n\n"
+     "static int cpufreq_bouncing_register_callback(",
+     "EXPORT_SYMBOL_GPL(cb_stuff_init);"),
     # nxp-nci asks an unpublished OnePlus module for the NFC chip's ID (get_nfc_id); OnePlus' own
     # earlier way, left commented out under it, reads the ID GPIO in this driver
     ("nfc/i2c_drv.c",

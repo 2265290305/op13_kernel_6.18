@@ -18,7 +18,8 @@ An Android common kernel **6.18** port for the **OnePlus 13** (Snapdragon 8 Elit
 | Works | Boot to ColorOS, display and touch, GPU, adb, Wi-Fi, fingerprint (FOD), camera, flashlight and face unlock (test-58) |
 | Partly | Brightness: set from settings and kept across screen-on/AOD; OnePlus' unpublished display extension is missing, so its extras are too (the panel's PWM mode switch at low brightness, `/dev/oplus_display`); AOD picks the panel's own AOD-high/low level from the requested brightness (test-59). The display sometimes stops updating |
 | Root | KernelSU built in: [BakaSU](https://github.com/Baka-SU/BakaSU), pinned in [`scripts/fetch.sh`](scripts/fetch.sh) (test-59) |
-| Not built | WALT and what needs it (until it is, the vendor's switch to the `walt` CPU governor gets `schedutil`), OnePlus' zsmalloc fork (hybridswap, zram tuning), GEAS, and modules OnePlus has not published |
+| Testing | WALT, Qualcomm's scheduler and its `walt` CPU governor ([`scripts/build_walt.sh`](scripts/build_walt.sh), `walt` branch): only `boot-full` loads it; without it the vendor's switch to `walt` gets `schedutil` |
+| Not built | OnePlus' zsmalloc fork (hybridswap, zram tuning), GEAS, and modules OnePlus has not published |
 
 Each release's notes say what changed and what is known to be broken.
 
