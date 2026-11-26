@@ -710,7 +710,9 @@ def fix(path):
 		text = text2
 	# the sched_stat_runtime tracepoint has no vruntime since 6.8: its handlers lose that parameter
 	# (as the OnePlus 15's game_opt has them)
-	for name in set(re.findall(r"\bregister_trace_sched_stat_runtime\(\s*(\w+)", text)):
+	# (also registered through OnePlus' REGISTER_TRACE_VH(sched_stat_runtime, handler): schedinfo)
+	for name in set(re.findall(r"\bregister_trace_sched_stat_runtime\(\s*(\w+)", text)
+			+ re.findall(r"\bREGISTER_TRACE_VH\(\s*sched_stat_runtime\s*,\s*(\w+)", text)):
 		text2 = re.sub(r"(\b%s\s*\(\s*void\s*\*\s*\w+\s*,\s*struct\s+task_struct\s*\*\s*\w+\s*,\s*u64\s+\w+)"
 			r"\s*,\s*u64\s+\w+\s*\)" % re.escape(name), r"\1)", text)
 		if text2 != text:

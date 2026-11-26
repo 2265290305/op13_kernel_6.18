@@ -402,9 +402,6 @@ EDITS = [
     # (task_struct's cpu is thread_info's on arm64 since 5.16)
     ("detection/task_overtime.c", "cpufreq_quick_get(task->cpu)", "cpufreq_quick_get(task_cpu(task))"),
     # the sched_stat_runtime tracepoint has no vruntime since 6.8
-    ("sched/sched_info/osi_tasktrack.c",
-     "void sched_stat_runtime_handler(void *unused,\n\t\t\tstruct task_struct *tsk, u64 runtime, u64 vruntime)\n",
-     "void sched_stat_runtime_handler(void *unused,\n\t\t\tstruct task_struct *tsk, u64 runtime)\t/* op13: 6.8+ */\n"),
     ("sched/sched_assist/sa_priority.c",
      "void android_vh_sched_stat_runtime_handler(void *unused, struct task_struct *task, u64 delta_exec, u64 vruntime)\n",
      "void android_vh_sched_stat_runtime_handler(void *unused, struct task_struct *task, u64 delta_exec)\t/* op13: 6.8+ */\n"),
