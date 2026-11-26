@@ -167,7 +167,10 @@ mk_loop() {
 		tag=$(basename "$P")-mk-$(echo "$dir" | tr '/' '_')
 		MO=$P/obj/$tag
 		mkdir -p "$MO"
-		vars=; defs=
+		# a Qualcomm phone, as OnePlus' kernel configuration says for every OnePlus module
+		# (CONFIG_OPLUS_SYSTEM_KERNEL_QCOM=y; their Bazel builds' "qcom" defines): Makefiles choose
+		# their sources by it -- cpufreq_bouncing's and kernel_fb's are MediaTek's without it
+		vars="CONFIG_OPLUS_SYSTEM_KERNEL_QCOM=y"; defs="-DCONFIG_OPLUS_SYSTEM_KERNEL_QCOM=1"
 		for o in $opts; do vars="$vars $o=m"; defs="$defs -D${o}_MODULE=1"; done
 		# the roots the directory's Android Makefile hands its Kbuild (KBUILD_OPTIONS += X_ROOT=
 		# $(KERNEL_SRC)/$(M)[/..]): NFC's Kbuild includes $(NFC_ROOT)/config/gki_nfc.conf
@@ -234,8 +237,9 @@ PY2
 				MO1=$MO-$n; mkdir -p "$MO1"; cp "$MO/extra.symvers" "$MO1/"
 				set +e
 				"${KMAKE[@]}" -k M="$T/$dir" MO="$MO1" modules -j"$J" KBUILD_EXTRA_SYMBOLS="$MO1/extra.symvers" "$o1=m" \
+					CONFIG_OPLUS_SYSTEM_KERNEL_QCOM=y \
 					NOSTDINC_FLAGS="-nostdinc -I$P/inc -I$S/include -I$S/include/uapi -idirafter $W/inc8750 -idirafter $C -idirafter $S" \
-					KCFLAGS="-Wno-error -include $CONF -D${o1}_MODULE=1" > "$LOG/$tag-$n.log" 2>&1
+					KCFLAGS="-Wno-error -include $CONF -DCONFIG_OPLUS_SYSTEM_KERNEL_QCOM=1 -D${o1}_MODULE=1" > "$LOG/$tag-$n.log" 2>&1
 				set -e
 				ko=$(find "$MO1" -name "$n.ko" -o -name "$(echo "$n" | tr '_' '-').ko" | head -1)
 				[ -n "$ko" ] && cp "$ko" "$MO/" && [ -f "$MO1/Module.symvers" ] && SYMS="$SYMS $MO1/Module.symvers"
