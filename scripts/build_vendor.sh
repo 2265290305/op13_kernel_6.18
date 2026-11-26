@@ -172,6 +172,12 @@ mk_loop() {
 		# (CONFIG_OPLUS_SYSTEM_KERNEL_QCOM=y; their Bazel builds' "qcom" defines): Makefiles choose
 		# their sources by it -- cpufreq_bouncing's and kernel_fb's are MediaTek's without it
 		vars="CONFIG_OPLUS_SYSTEM_KERNEL_QCOM=y"; defs="-DCONFIG_OPLUS_SYSTEM_KERNEL_QCOM=1"
+		# OnePlus' CPU and scheduler modules, as OnePlus built them, for a kernel with WALT
+		# (CONFIG_SCHED_WALT=m; the SoC here is configured without): sched_assist's WALT side
+		# (qcom_rearrange_pipeline_preferred_cpus, which WALT calls), task_overload's WALT demand. On
+		# the stock phone sched_assist, frame_boost and task_overload use only WALT's headers --
+		# WALT links against them, not they against it.
+		case $dir in vendor/oplus/kernel/cpu/*) defs="$defs -DCONFIG_SCHED_WALT_MODULE=1" ;; esac
 		for o in $opts; do vars="$vars $o=m"; defs="$defs -D${o}_MODULE=1"; done
 		# the roots the directory's Android Makefile hands its Kbuild (KBUILD_OPTIONS += X_ROOT=
 		# $(KERNEL_SRC)/$(M)[/..]): NFC's Kbuild includes $(NFC_ROOT)/config/gki_nfc.conf
@@ -240,7 +246,7 @@ PY2
 				"${KMAKE[@]}" -k M="$T/$dir" MO="$MO1" modules -j"$J" KBUILD_EXTRA_SYMBOLS="$MO1/extra.symvers" "$o1=m" \
 					CONFIG_OPLUS_SYSTEM_KERNEL_QCOM=y \
 					NOSTDINC_FLAGS="-nostdinc -I$P/inc -I$S/include -I$S/include/uapi -idirafter $W/inc8750 -idirafter $C -idirafter $S" \
-					KCFLAGS="-Wno-error -include $CONF -DCONFIG_OPLUS_SYSTEM_KERNEL_QCOM=1 -D${o1}_MODULE=1" > "$LOG/$tag-$n.log" 2>&1
+					KCFLAGS="-Wno-error -include $CONF $defs -D${o1}_MODULE=1" > "$LOG/$tag-$n.log" 2>&1
 				set -e
 				ko=$(find "$MO1" -name "$n.ko" -o -name "$(echo "$n" | tr '_' '-').ko" | head -1)
 				[ -n "$ko" ] && cp "$ko" "$MO/" && [ -f "$MO1/Module.symvers" ] && SYMS="$SYMS $MO1/Module.symvers"
@@ -343,10 +349,19 @@ PY
 	# switch its wanted modules on set to m (and defined for the C code)
 	python3 -I "$ROOT/scripts/vendor_mkplan.py" "$T" "$WANT" "$HAVE:$OUTM" "$P/mkplan.txt" "$@"
 	mk_loop "$P/mkplan.txt"
-	# a directory whose modules failed only at the link, for a symbol a directory built after it
-	# exports (the OnePlus 13's oplus_f2fslog_storage and oplus_uprobe: pr_storage of
-	# oplus_storage_log, a directory later): built once more now, for the modules still missing
-	python3 -I - "$P/mkplan.txt" "$P/mkplan2.txt" "$OUTM" "$LOG" "$(basename "$P")" <<'PY'
+	mk_again
+	return 0
+}
+
+# mk_again (build()'s P, T): a Makefile directory whose modules failed only at the link, for a symbol
+# a directory built after it exports (the OnePlus 13's oplus_f2fslog_storage and oplus_uprobe:
+# pr_storage of oplus_storage_log, a directory later; its scheduler group: sched_assist, then
+# frame_boost, then task_overload), built again for the modules still missing -- while that builds
+# any. Also once WALT is built (schedinfo links against it).
+mk_again() {
+	local round before
+	for round in 1 2 3; do
+		python3 -I - "$P/mkplan.txt" "$P/mkplan2.txt" "$OUTM" "$LOG" "$(basename "$P")" <<'PY'
 import os, re, sys
 plan, out, outm, log, pas = sys.argv[1:]
 have = {f[:-3].replace("-", "_") for f in os.listdir(outm) if f.endswith(".ko")}
@@ -363,10 +378,12 @@ for line in open(plan):
 		keep.append("%s|%s|%s\n" % (d, opts, " ".join(missing)))
 open(out, "w").write("".join(keep))
 PY
-	if [ -s "$P/mkplan2.txt" ]; then
-		echo "build_vendor: $(wc -l < "$P/mkplan2.txt") Makefile directories again, for symbols built after them" | tee -a "$LOG/summary.txt"
+		[ -s "$P/mkplan2.txt" ] || break
+		echo "build_vendor: $(wc -l < "$P/mkplan2.txt") Makefile directories again, for symbols built after them (round $round)" | tee -a "$LOG/summary.txt"
+		before=$(ls "$OUTM" | wc -l)
 		mk_loop "$P/mkplan2.txt"
-	fi
+		[ "$(ls "$OUTM" | wc -l)" -gt "$before" ] || break
+	done
 	return 0
 }
 
@@ -542,6 +559,11 @@ grep '^build_walt: ' "$LOG/walt.txt" | tee -a "$LOG/summary.txt" || true
 WSYMS=
 [ -f "$ROOT/out/waltmods/sched-walt.ko" ] && WSYMS=$(find "$ROOT/out/walt" -name Module.symvers | tr '\n' ' ')
 SYMS="$SYMS $WSYMS"
+# the OnePlus 13's Makefile modules that link against WALT (its schedinfo)
+if [ -n "$WSYMS" ]; then
+	P=$P1; T=$P1/tree
+	mk_again
+fi
 
 # late SoC modules: the SoC build drops what does not link, and some SoC modules link against
 # OnePlus' (on the OnePlus 13 the charger, oplus_chg_v2, exports qti_battery_charger_get_prop and

@@ -112,7 +112,7 @@ CLSRC=$ROOT/out/vendor/op13/tree/vendor/oplus/kernel/cpu/close_loop
 mkdir -p "$CL"
 cp "$CLSRC"/*.[ch] "$CL/"
 python3 -I "$ROOT/scripts/vendor_fix618.py" "$CL"
-sed -i 's|#include <\.\./\.\./\.\./kernel/sched/walt/walt\.h>|#include "walt.h"\t/* op13: WALT (scripts/build_walt.sh) */|' "$CL/close_loop.c"
+sed -i -E 's|#include <(\.\./)*kernel/sched/walt/walt\.h>|#include "walt.h"\t/* op13: WALT (scripts/build_walt.sh) */|' "$CL/close_loop.c"
 {
 	echo "obj-m += oplus_bsp_close_loop.o"
 	echo "oplus_bsp_close_loop-y := close_loop.o"

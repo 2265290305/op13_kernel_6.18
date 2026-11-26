@@ -144,6 +144,9 @@ RULES = [
 	# source (build_vendor.sh puts it after every other include directory)
 	("kernel headers", re.compile(r'#include\s*"(?:\.\./)+(kernel/(?:irq|sched|locking|time|cgroup|workqueue|rcu)/[\w./-]+\.h)"'),
 		r"#include <\1>"),
+	# WALT's private header by the path OnePlus' kernel tree gives it (<../../../kernel/sched/walt/
+	# walt.h>): the SoC tree's, which build_vendor.sh has after every other include directory
+	("walt header", re.compile(r"#include\s*<(?:\.\./)+(kernel/sched/walt/walt\.h)>"), r"#include <\1>"),
 	# WALT's per-task data is out of line on 6.18 (android_task_vendor_data(); the task's own
 	# android_vendor_data1 is 6 u64s, WALT's struct 448 bytes): reached through the accessor, as the
 	# OnePlus 15's 6.12 code does -- the 6.6 cast read whatever follows that array in task_struct
