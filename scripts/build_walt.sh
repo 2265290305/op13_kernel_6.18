@@ -9,6 +9,12 @@
 # it is built after them, out of the SoC tree; the SoC modules themselves stay built without
 # CONFIG_SCHED_WALT (configs/op13_overrides.bzl), against walt.h's stubs, as before.
 # sched-penalty: the OnePlus 13's own (its 6.6 vendor kernel's penalty.c), against WALT's headers.
+# oplus_bsp_close_loop: OnePlus' CPU close loop, the OnePlus 13's (a Makefile-only module), against
+# WALT's headers and the close-loop callbacks walt_fix.py brings over from the OnePlus 13's own WALT.
+#
+# Run by build_vendor.sh, once OnePlus' modules it needs are built: OnePlus' modules and SoC modules
+# still to be tried there link against it (schedinfo: walt_rq; hung_task_enh, cpu_mpam: WALT's task
+# data).
 #
 # Modules in out/waltmods, their names in out/waltmods.list: build_bootimg.sh treats them as drivers
 # new to the boot (boot.img holds them, boot-full.img loads them at the end of the batch). Logs in
@@ -32,7 +38,8 @@ OMRG=$(find "$ROOT/out/vendor" -path '*cpu/oplus_omrg/oplus_omrg.h' 2>/dev/null 
 [ -n "$OMRG" ] && ln -sfn "$OMRG" "$W/inc/linux/oplus_omrg.h"
 SYMS="$S/Module.symvers $(find "$ROOT/out/vendor" "$ROOT/out/oplus" "$ROOT/out/extra" -name Module.symvers 2>/dev/null | tr '\n' ' ') $(ls "$ROOT"/out/tp-log/*.symvers 2>/dev/null | tr '\n' ' ')"
 # OnePlus' options for WALT (modules.bzl's copts) and its headers by OnePlus' paths
-COPTS="-DCONFIG_OPLUS_ADD_CORE_CTRL_MASK -DCONFIG_OPLUS_FEATURE_SCHED_ASSIST -DCONFIG_OPLUS_SCHED_HALT_MASK_PRT -DCONFIG_OPLUS_FEATURE_FRAME_BOOST -DCONFIG_OPLUS_FEATURE_SCHED_EXT -DCONFIG_OPLUS_FEATURE_GEAS"
+# (and the CPU close loop's callbacks: the OnePlus 13's WALT has them, its oplus_bsp_close_loop uses them)
+COPTS="-DCONFIG_OPLUS_ADD_CORE_CTRL_MASK -DCONFIG_OPLUS_FEATURE_SCHED_ASSIST -DCONFIG_OPLUS_SCHED_HALT_MASK_PRT -DCONFIG_OPLUS_FEATURE_FRAME_BOOST -DCONFIG_OPLUS_FEATURE_SCHED_EXT -DCONFIG_OPLUS_FEATURE_GEAS -DCONFIG_OPLUS_FEATURE_CPU_CLOSE_LOOP"
 INCS="-nostdinc -I$S/include -I$W/inc -I$ROOT/src/mods8850/vendor/oplus/kernel/cpu/sched -I$ROOT/src/mods8850/vendor/oplus/kernel/cpu -idirafter $C"
 # kmake <dir> <log> <extra symbols>
 kmake() {
@@ -67,6 +74,7 @@ else
 	exit 1
 fi
 
+rc=0
 # sched-penalty: the OnePlus 13's own, in a directory of its own next to WALT's headers
 P=$W/penalty
 mkdir -p "$P"
@@ -84,6 +92,31 @@ if kmake "$P" "$LOG/sched-penalty.log" "$SYMS $W/walt/Module.symvers" && [ -f "$
 else
 	echo "build_walt: sched-penalty: FAILED (sched-walt stays)"
 	grep -E ': (fatal )?error: |^ERROR: modpost|WARNING: modpost: .*undefined' "$LOG/sched-penalty.log" | sed -E "s|$W/||" | sort -u | head -20 || true
-	exit 1
+	rc=1
+fi
+
+# oplus_bsp_close_loop: the OnePlus 13's, as build_vendor.sh prepared it (its 6.6 -> 6.18 sweeps), else
+# from its sources; its include of WALT's header by OnePlus' tree path is WALT's here
+CL=$W/close_loop
+CLSRC=$ROOT/out/vendor/op13/tree/vendor/oplus/kernel/cpu/close_loop
+[ -f "$CLSRC/close_loop.c" ] || CLSRC=$ROOT/src/mods8750/vendor/oplus/kernel/cpu/close_loop
+mkdir -p "$CL"
+cp "$CLSRC"/*.[ch] "$CL/"
+python3 -I "$ROOT/scripts/vendor_fix618.py" "$CL"
+sed -i 's|#include <\.\./\.\./\.\./kernel/sched/walt/walt\.h>|#include "walt.h"\t/* op13: WALT (scripts/build_walt.sh) */|' "$CL/close_loop.c"
+{
+	echo "obj-m += oplus_bsp_close_loop.o"
+	echo "oplus_bsp_close_loop-y := close_loop.o"
+	echo "ccflags-y += -I\$(src) -I$W/walt -DCONFIG_SCHED_WALT_MODULE=1 $COPTS"
+} > "$CL/Kbuild"
+if kmake "$CL" "$LOG/oplus_bsp_close_loop.log" "$SYMS $W/walt/Module.symvers" && [ -f "$CL/oplus_bsp_close_loop.ko" ]; then
+	cp "$CL/oplus_bsp_close_loop.ko" "$OUTM/"
+	echo oplus_bsp_close_loop >> "$ROOT/out/waltmods.list"
+	echo "build_walt: oplus_bsp_close_loop: built"
+else
+	echo "build_walt: oplus_bsp_close_loop: FAILED (WALT stays)"
+	grep -E ': (fatal )?error: |^ERROR: modpost|WARNING: modpost: .*undefined' "$LOG/oplus_bsp_close_loop.log" | sed -E "s|$W/||" | sort -u | head -20 || true
+	rc=1
 fi
 echo "build_walt: $(ls "$OUTM" | tr '\n' ' ')"
+exit $rc

@@ -32,6 +32,71 @@ EDITS = [
     ("walt_cfs.c",
      "extern void set_next_entity(struct cfs_rq *cfs_rq, struct sched_entity *se);\n",
      ""),
+    # OnePlus' CPU close loop (oplus_bsp_close_loop) steers the governor's utilization through two
+    # callbacks it registers with WALT and asks WALT for a frequency update: this tree calls the first
+    # callback but defines neither, nor the functions close_loop calls -- the OnePlus 13's own WALT
+    # (its 6.6 vendor kernel's kernel/sched/walt) has all of it, taken from there
+    ("walt.h",
+     "#if IS_ENABLED(CONFIG_OPLUS_FEATURE_FRAME_BOOST)\n#include <frame_boost/frame_group.h>\n#endif\n",
+     "#if IS_ENABLED(CONFIG_OPLUS_FEATURE_FRAME_BOOST)\n#include <frame_boost/frame_group.h>\n#endif\n\n"
+     "/* op13: the OnePlus 13's WALT (scripts/walt_fix.py) */\n"
+     "#if IS_ENABLED(CONFIG_OPLUS_FEATURE_CPU_CLOSE_LOOP)\n"
+     "extern void walt_cl_update_util_ops(\n"
+     "\tunsigned long (*)(int cpu, unsigned long orig, bool ed_active),\n"
+     "\tunsigned long (*)(int cpu, unsigned long orig, bool ed_active));\n"
+     "extern void walt_trig_cpufreq_update(int cpu);\n"
+     "#endif\n"),
+    ("cpufreq_walt.c",
+     "static unsigned long waltgov_get_util(struct waltgov_cpu *wg_cpu)\n",
+     "/* op13: the OnePlus 13's WALT (scripts/walt_fix.py) */\n"
+     "#if IS_ENABLED(CONFIG_OPLUS_FEATURE_CPU_CLOSE_LOOP)\n"
+     "static unsigned long cl_util_dummy(int cpu, unsigned long orig, bool ed_active)\n"
+     "{\n\treturn orig;\n}\n\n"
+     "static unsigned long cl_boost_util_dummy(int cpu, unsigned long orig, bool ed_active)\n"
+     "{\n\treturn orig;\n}\n\n"
+     "static unsigned long (*walt_cl_util)(int cpu, unsigned long orig, bool ed_active) = cl_util_dummy;\n"
+     "static unsigned long (*walt_cl_boost_util)(int cpu, unsigned long orig, bool ed_active) = cl_boost_util_dummy;\n\n"
+     "void walt_cl_update_util_ops(\n"
+     "\tunsigned long (*cl_util)(int cpu, unsigned long orig, bool ed_active),\n"
+     "\tunsigned long (*cl_boost_util)(int cpu, unsigned long orig, bool ed_active))\n"
+     "{\n"
+     "\twalt_cl_util = cl_util;\n"
+     "\twalt_cl_boost_util = cl_boost_util;\n"
+     "\tpr_info(\"%s updated\\n\", __func__);\n"
+     "}\n"
+     "EXPORT_SYMBOL_GPL(walt_cl_update_util_ops);\n\n"
+     "void walt_trig_cpufreq_update(int cpu)\n"
+     "{\n"
+     "\tif (cpu == -1) {\n"
+     "\t\tstruct walt_sched_cluster *cluster;\n\n"
+     "\t\tfor_each_sched_cluster(cluster) {\n"
+     "\t\t\tcpumask_t cluster_online_cpus;\n"
+     "\t\t\tunsigned int num_cpus, i = 1;\n"
+     "\t\t\tint wflag = WALT_CPUFREQ_BOOST_UPDATE_BIT;\n\n"
+     "\t\t\tcpumask_and(&cluster_online_cpus, &cluster->cpus, cpu_online_mask);\n"
+     "\t\t\tnum_cpus = cpumask_weight(&cluster_online_cpus);\n\n"
+     "\t\t\tfor_each_cpu(cpu, &cluster_online_cpus) {\n"
+     "\t\t\t\tif (i == num_cpus)\n"
+     "\t\t\t\t\twaltgov_run_callback(cpu_rq(cpu), wflag);\n"
+     "\t\t\t\telse\n"
+     "\t\t\t\t\twaltgov_run_callback(cpu_rq(cpu), wflag | WALT_CPUFREQ_CONTINUE_BIT);\n"
+     "\t\t\t\t++i;\n"
+     "\t\t\t}\n"
+     "\t\t}\n"
+     "\t} else {\n"
+     "\t\twaltgov_run_callback(cpu_rq(cpu), WALT_CPUFREQ_BOOST_UPDATE_BIT);\n"
+     "\t}\n"
+     "}\n"
+     "EXPORT_SYMBOL_GPL(walt_trig_cpufreq_update);\n"
+     "#endif\n\n"
+     "static unsigned long waltgov_get_util(struct waltgov_cpu *wg_cpu)\n"),
+    ("cpufreq_walt.c",
+     "\t\tstruct waltgov_cpu *wg_cpu, unsigned int reason)\n{\n\tif (boost_util && boost_util >= *cur_util) {\n",
+     "\t\tstruct waltgov_cpu *wg_cpu, unsigned int reason)\n{\n"
+     "#if IS_ENABLED(CONFIG_OPLUS_FEATURE_CPU_CLOSE_LOOP)\t/* op13: the OnePlus 13's WALT (scripts/walt_fix.py) */\n"
+     "\tboost_util = walt_cl_boost_util(wg_cpu->cpu, boost_util, wg_cpu->walt_load.ed_active);\n"
+     "#endif\n\n"
+     "\tif (boost_util && boost_util >= *cur_util) {\n"),
 ]
 
 

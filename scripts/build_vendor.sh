@@ -377,7 +377,9 @@ import os, sys
 out, have, outm, *lists = sys.argv[1:]
 nosrc = lists.pop()
 c = lambda n: os.path.basename(n.strip()).removesuffix(".ko").replace("-", "_")
-got = {c(f) for d in (have, outm) for f in os.listdir(d)}
+# (and WALT's modules, scripts/build_walt.sh: out/waltmods next to out/vendormods)
+waltm = os.path.join(os.path.dirname(outm), "waltmods")
+got = {c(f) for d in (have, outm, waltm) if os.path.isdir(d) for f in os.listdir(d)}
 # what the kernel has built in (xhci-sideband, drm_display_helper: =y in our GKI)
 builtin = os.path.join(os.environ.get("O", ""), "modules.builtin")
 if os.path.isfile(builtin):
@@ -403,7 +405,7 @@ retry_round() {
 	tag=$(echo "$label" | tr -c 'A-Za-z0-9\n' '_')
 	# every symbol exported by now
 	cat $SYMS "$O/Module.symvers" "$S/Module.symvers" 2>/dev/null | awk '{ print $2 }' | sort -u > "$W/exported.txt"
-	ls "$OUTM" "$HAVE" 2>/dev/null | sed -n 's/\.ko$//p' | sort -u > "$W/built.txt"
+	ls "$OUTM" "$HAVE" "$ROOT/out/waltmods" 2>/dev/null | sed -n 's/\.ko$//p' | sort -u > "$W/built.txt"
 	again=0
 	echo "$label: $(wc -l < "$W/exported.txt") symbols exported, $(wc -l < "$W/built.txt") modules built; passes: $*" >> "$LOG/retry.txt"
 	for P in "$@"; do
@@ -490,12 +492,26 @@ if [ "$n" -gt 0 ]; then
 	build "$P2" "$W/wanted2.txt" vendor/oplus vendor/qcom/opensource
 fi
 
+# WALT (scripts/build_walt.sh: sched-walt, sched-penalty, oplus_bsp_close_loop), here: it links against
+# OnePlus' scheduler modules, built by now, and what is still to be tried below links against it --
+# OnePlus' schedinfo (walt_rq; a second chance) and the SoC's hung_task_enh and cpu_mpam (WALT's task
+# data; late SoC modules). Its modules are in out/waltmods; one that does not build is left out.
+set +e
+bash "$ROOT/scripts/build_walt.sh" > "$LOG/walt.txt" 2>&1
+set -e
+grep '^build_walt: ' "$LOG/walt.txt" | tee -a "$LOG/summary.txt" || true
+WSYMS=
+[ -f "$ROOT/out/waltmods/sched-walt.ko" ] && WSYMS=$(find "$ROOT/out/walt" -name Module.symvers | tr '\n' ' ')
+SYMS="$SYMS $WSYMS"
+
 # late SoC modules: the SoC build drops what does not link, and some SoC modules link against
 # OnePlus' (on the OnePlus 13 the charger, oplus_chg_v2, exports qti_battery_charger_get_prop and
 # register_hboost_event_notifier, which the flash LEDs and qcom-hv-haptics use) -- built before
 # OnePlus' existed. Each dropped one that is still wanted is tried once more, alone, against
 # everything built by now (its objects in out/soc-late, the SoC tree's own Kbuild put back after).
 still_wanted "$W/wanted-late.txt" > /dev/null
+# SoC modules that need WALT itself, not its stubs (struct walt_task_struct)
+WALT_USERS="hung_task_enh cpu_mpam"
 if [ -s "$ROOT/out/soc-dropped.txt" ] && [ -f "$S/Kbuild" ]; then
 	cp "$S/Kbuild" "$W/soc-Kbuild.saved"
 	# the SoC tree is built in place: 6.18 refuses a separate-output build (MO=) of a tree with a
@@ -506,7 +522,7 @@ if [ -s "$ROOT/out/soc-dropped.txt" ] && [ -f "$S/Kbuild" ]; then
 	# for every kernel symbol -- the late pass failed so in test-48, once it ran at all)
 	LSYMS="$S/Module.symvers $(find "$W" -name Module.symvers 2>/dev/null | tr '\n' ' ') \
 $(find "$ROOT/out/oplus" "$ROOT/out/extra" -name Module.symvers 2>/dev/null | tr '\n' ' ') \
-$(ls "$ROOT"/out/tp-log/*.symvers 2>/dev/null | tr '\n' ' ')"
+$(ls "$ROOT"/out/tp-log/*.symvers 2>/dev/null | tr '\n' ' ') $WSYMS"
 	while read -r m; do
 		k=$(basename "$m" | tr '-' '_')
 		grep -qx "$k.ko" "$W/wanted-late.txt" || continue
@@ -514,8 +530,12 @@ $(ls "$ROOT"/out/tp-log/*.symvers 2>/dev/null | tr '\n' ' ')"
 		rm -rf "$MO" && mkdir -p "$MO"
 		python3 -I "$REF/k618_soc_kbuild.py" kbuild "$S" "$ROOT/out/soc-kconfig/.config" "$O/.config" "$m" \
 			> "$LOG/soc-late-$k.log" 2>&1 || continue
+		# the SoC is configured without WALT (its modules use walt.h's stubs); those that read WALT's
+		# task data have nothing to read without it, so they are built with it once WALT is
+		kc=
+		case " $WALT_USERS " in *" $k "*) [ -n "$WSYMS" ] && kc="-DCONFIG_SCHED_WALT_MODULE=1" ;; esac
 		set +e
-		"${KMAKE[@]}" M="$S" MO="$MO" -j"$J" modules KBUILD_EXTRA_SYMBOLS="$LSYMS" >> "$LOG/soc-late-$k.log" 2>&1
+		"${KMAKE[@]}" M="$S" MO="$MO" -j"$J" modules KBUILD_EXTRA_SYMBOLS="$LSYMS" ${kc:+KCFLAGS="$kc"} >> "$LOG/soc-late-$k.log" 2>&1
 		set -e
 		ko=$(find "$MO" -name "$(basename "$m").ko" | head -1)
 		if [ -n "$ko" ]; then

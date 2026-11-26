@@ -105,15 +105,12 @@ jobs:
         continue-on-error: true
         run: bash scripts/build_extra.sh
 
-      - name: Build every other OnePlus driver (from OnePlus' Bazel definitions)
+      # (WALT too: scripts/build_walt.sh, run by build_vendor.sh between OnePlus' modules it needs and
+      # those that need it)
+      - name: Build every other OnePlus driver (from OnePlus' Bazel definitions) and WALT
         id: vendor
         continue-on-error: true
         run: bash scripts/build_vendor.sh
-
-      - name: WALT (sched-walt, sched-penalty)
-        id: walt
-        continue-on-error: true
-        run: bash scripts/build_walt.sh
 
       - name: Boot image
         id: bootimg
