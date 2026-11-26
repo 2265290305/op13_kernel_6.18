@@ -40,7 +40,16 @@ SYMS="$S/Module.symvers $(find "$ROOT/out/vendor" "$ROOT/out/oplus" "$ROOT/out/e
 # OnePlus' options for WALT (modules.bzl's copts) and its headers by OnePlus' paths
 # (and the CPU close loop's callbacks: the OnePlus 13's WALT has them, its oplus_bsp_close_loop uses them)
 COPTS="-DCONFIG_OPLUS_ADD_CORE_CTRL_MASK -DCONFIG_OPLUS_FEATURE_SCHED_ASSIST -DCONFIG_OPLUS_SCHED_HALT_MASK_PRT -DCONFIG_OPLUS_FEATURE_FRAME_BOOST -DCONFIG_OPLUS_FEATURE_SCHED_EXT -DCONFIG_OPLUS_FEATURE_GEAS -DCONFIG_OPLUS_FEATURE_CPU_CLOSE_LOOP"
-INCS="-nostdinc -I$S/include -I$W/inc -I$ROOT/src/mods8850/vendor/oplus/kernel/cpu/sched -I$ROOT/src/mods8850/vendor/oplus/kernel/cpu -idirafter $C"
+# OnePlus' scheduler headers (sa_fair.h, frame_group.h, ... and the per-task struct they reach) from
+# the tree OnePlus' sched_assist was built from (build_vendor.sh builds the whole group from one): the
+# OnePlus 13's as build_vendor.sh prepared it, else the OnePlus 15's
+CPU=$ROOT/src/mods8850/vendor/oplus/kernel/cpu
+if find "$ROOT/out/vendor/op13/obj" -name oplus_bsp_sched_assist.ko 2>/dev/null | grep -q . \
+		&& [ -f "$ROOT/out/vendormods/oplus_bsp_sched_assist.ko" ]; then
+	CPU=$ROOT/out/vendor/op13/tree/vendor/oplus/kernel/cpu
+fi
+echo "build_walt: OnePlus' scheduler headers from $CPU"
+INCS="-nostdinc -I$S/include -I$W/inc -I$CPU/sched -I$CPU -idirafter $C"
 # kmake <dir> <log> <extra symbols>
 kmake() {
 	set +e

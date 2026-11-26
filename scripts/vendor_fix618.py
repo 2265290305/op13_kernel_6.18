@@ -144,6 +144,15 @@ RULES = [
 	# source (build_vendor.sh puts it after every other include directory)
 	("kernel headers", re.compile(r'#include\s*"(?:\.\./)+(kernel/(?:irq|sched|locking|time|cgroup|workqueue|rcu)/[\w./-]+\.h)"'),
 		r"#include <\1>"),
+	# WALT's per-task data is out of line on 6.18 (android_task_vendor_data(); the task's own
+	# android_vendor_data1 is 6 u64s, WALT's struct 448 bytes): reached through the accessor, as the
+	# OnePlus 15's 6.12 code does -- the 6.6 cast read whatever follows that array in task_struct
+	("walt task data", re.compile(r"\(\s*struct\s+walt_task_struct\s*\*\s*\)\s*([\w>.-]+?)->android_vendor_data1\b"),
+		r"(struct walt_task_struct *)android_task_vendor_data(\1)"),
+	# check_preempt_curr() is wakeup_preempt() since 6.8 (same arguments, exported)
+	("wakeup_preempt", re.compile(r"\bcheck_preempt_curr\("), "wakeup_preempt("),
+	# root_domain's overload flag is "overloaded" since 6.9
+	("rd overloaded", re.compile(r"\brd->overload\b"), "rd->overloaded"),
 	# cfs_rq.h_nr_running is h_nr_queued since 6.14 (h_nr_runnable leaves the delayed ones out)
 	("h_nr_queued", re.compile(r"\bh_nr_running\b"), "h_nr_queued"),
 	# the runnable ones without the delayed-dequeue ones: h_nr_runnable (6.14; h_nr_delayed is gone)
@@ -451,6 +460,17 @@ def fix(path):
 	if text2 != text:
 		note(path, "DAI formats")
 		text = text2
+	# capacity_orig_of() (kernel/sched/sched.h: rq->cpu_capacity_orig, arch_scale_cpu_capacity() as
+	# 6.6's update_cpu_capacity() set it) is gone since 6.8: the value itself, in files where nothing
+	# else provides one (WALT's own kernel/sched/walt/walt.h has its own, from its thermal-capped
+	# capacity; include/linux/sched/walt.h has none)
+	if "capacity_orig_of(" in text \
+			and not re.search(r'#include\s*["<][^">]*walt/walt\.h|#include\s*"walt\.h"', text) \
+			and not re.search(r"\bcapacity_orig_of\s*\(\s*int\b|define\s+capacity_orig_of\b", text):
+		text2 = re.sub(r"(?<![\w.>])capacity_orig_of\(", "arch_scale_cpu_capacity(", text)
+		if text2 != text:
+			note(path, "capacity_orig_of")
+			text = text2
 	# struct fd: .file / .flags
 	for var in set(re.findall(r"\bstruct\s+fd\s+(\w+)", text)):
 		text2 = re.sub(r"\b%s\.file\b" % re.escape(var), "fd_file(%s)" % var, text)

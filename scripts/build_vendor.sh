@@ -44,6 +44,7 @@ JOBSERVER="-j --jobserver-auth=9,9"
 CONF=$W/soc-autoconf.h
 soc_autoconf "$CONF"
 : > "$LOG/summary.txt"
+: > "$W/sg-held.txt"	# (the scheduler group's, below)
 
 # what the other builds make already (SoC, techpacks, the kernel's own, OnePlus' boot and touch
 # modules): not made again
@@ -405,7 +406,8 @@ retry_round() {
 	tag=$(echo "$label" | tr -c 'A-Za-z0-9\n' '_')
 	# every symbol exported by now
 	cat $SYMS "$O/Module.symvers" "$S/Module.symvers" 2>/dev/null | awk '{ print $2 }' | sort -u > "$W/exported.txt"
-	ls "$OUTM" "$HAVE" "$ROOT/out/waltmods" 2>/dev/null | sed -n 's/\.ko$//p' | sort -u > "$W/built.txt"
+	ls "$OUTM" "$HAVE" "$ROOT/out/waltmods" 2>/dev/null | sed -n 's/\.ko$//p' | sort -u \
+		| grep -vxF -f "$W/sg-held.txt" > "$W/built.txt" || true
 	again=0
 	echo "$label: $(wc -l < "$W/exported.txt") symbols exported, $(wc -l < "$W/built.txt") modules built; passes: $*" >> "$LOG/retry.txt"
 	for P in "$@"; do
@@ -416,6 +418,11 @@ retry_round() {
 			IFS='|' read -r _l _n pkg base needs < <(awk -F'|' -v n="$name" '$2 == n' "$P/levels.txt") || true
 			[ -n "$pkg" ] || { echo "second chance: $name: not in $(basename "$P")'s plan" >> "$LOG/retry.txt"; continue; }
 			grep -qx "$base" "$W/built.txt" && continue
+			# the scheduler group from sched_assist's tree only (above)
+			case " $SCHED_GROUP " in *" $base "*)
+				if [ -n "$SG_ONLY_OP13" ]; then [ "$(basename "$P")" = op13 ] || continue
+				else [ "$(basename "$P")" != op13 ] || continue; fi ;;
+			esac
 			L=$LOG/$(basename "$P")-$name.log
 			if [ -f "$L" ]; then
 				grep -q '^ERROR: modpost: .* undefined!' "$L" || { echo "second chance: $name: not a link failure" >> "$LOG/retry.txt"; continue; }
@@ -482,6 +489,38 @@ fi
 build "$P1" "$ST/first_stage.load:$ST/vendor_dlkm.load:$ST/system_dlkm.load" \
 	vendor/oplus vendor/st vendor/nxp vendor/oplus8850 vendor/qcom/opensource msm8750
 
+
+# OnePlus' scheduler group shares one per-task struct, allocated by sched_assist (its
+# sa_common_struct.h), whose layout differs between the OnePlus 13's tree and the OnePlus 15's (fields
+# in between, QOS_SCHED's among them): a member built from the other tree than sched_assist reads and
+# writes it at other offsets. So the group comes from one tree: with the OnePlus 13's sched_assist
+# built, none of it from the OnePlus 15's (a member that did not build is left out); without it, the
+# OnePlus 13's members built so far go and pass 2 builds them with the OnePlus 15's sched_assist.
+SCHED_GROUP="oplus_bsp_sched_assist oplus_bsp_frame_boost oplus_bsp_task_overload oplus_bsp_task_sched
+	oplus_bsp_schedinfo oplus_bsp_schedtune oplus_bsp_qos_sched oplus_bsp_task_cpustats osml_monitor
+	ua_cpu_ioctl oplus_btuart_ux oplus_wq_dynamic_priority oplus_binder_strategy oplus_locking_strategy
+	oplus_bsp_uxmem_opt oplus_bsp_dynamic_readahead oplus_bsp_dfr_kp_freeze_detect
+	oplus_bsp_dfr_fdleak_check oplus_bsp_hybridswap_zram oplus_lock_torture"
+SCHED_GROUP=$(echo $SCHED_GROUP)
+SG_ONLY_OP13=
+: > "$W/sg-held.txt"
+if [ -f "$OUTM/oplus_bsp_sched_assist.ko" ]; then
+	echo "build_vendor: the OnePlus 13's sched_assist: its scheduler group only from the OnePlus 13's tree" | tee -a "$LOG/summary.txt"
+	SG_ONLY_OP13=1
+	# the members not built yet count as had for pass 2 (not built there, nor as another one's
+	# dependency); the second chances below still try the OnePlus 13's (schedinfo needs WALT first)
+	for m in $SCHED_GROUP; do
+		[ -f "$OUTM/$m.ko" ] && continue
+		: > "$HAVE/$m.ko"; echo "$m" >> "$W/sg-held.txt"
+		echo "build_vendor: $m: not from the OnePlus 15's tree (the OnePlus 13's sched_assist)" | tee -a "$LOG/summary.txt"
+	done
+else
+	for m in $SCHED_GROUP; do
+		[ -f "$OUTM/$m.ko" ] || continue
+		rm -f "$OUTM/$m.ko"; ok=$((ok - 1))
+		echo "build_vendor: $m: the OnePlus 13's set aside (sched_assist is the OnePlus 15's)" | tee -a "$LOG/summary.txt"
+	done
+fi
 
 # pass 2: what is still missing, from OnePlus' 6.12 tree for the OnePlus 15
 n=$(still_wanted "$W/wanted2.txt")
@@ -564,6 +603,10 @@ for round in 1 2; do
 done
 
 n=$(still_wanted "$LOG/failed.txt")
+# the scheduler group's members held out of pass 2 and still not built
+for m in $(cat "$W/sg-held.txt"); do
+	[ -f "$OUTM/$m.ko" ] || { echo "$m.ko" >> "$LOG/failed.txt"; n=$((n + 1)); }
+done
 ls "$OUTM" | sed 's/\.ko$//' > "$ROOT/out/vendormods.list"
 echo "build_vendor: built $ok; not built: $n (failed.txt)" | tee -a "$LOG/summary.txt"
 [ "$n" -eq 0 ]

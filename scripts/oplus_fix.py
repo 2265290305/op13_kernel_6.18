@@ -364,6 +364,97 @@ EDITS = [
      "\t\tinit_complete = true;\n\t}\n}\nEXPORT_SYMBOL_GPL(cb_stuff_init);\t/* op13: for WALT (scripts/oplus_fix.py) */\n\n\n"
      "static int cpufreq_bouncing_register_callback(",
      "EXPORT_SYMBOL_GPL(cb_stuff_init);"),
+    # --- the OnePlus 13's scheduler group (sched_assist and the modules on it), as OnePlus' own 6.12
+    # port (the OnePlus 15's tree) adapted the same code ---
+    # OnePlus' 6.6 kernel had a hook of its own in account_process_tick() (android_vh_account_process_
+    # tick_gran), which sched_assist forwarded as a hook it defined itself, android_vh_account_task_time
+    # with a tick count. 6.18 (as 6.12) has android_vh_account_task_time in the kernel, fired from
+    # there, one tick a call, without the count: sched_assist defines and fires nothing, its consumers
+    # take the kernel's hook (cputime.h now includes it), a tick each
+    ("sched/sched_assist/cputime.h",
+     "DECLARE_HOOK(android_vh_account_task_time,\n"
+     "\tTP_PROTO(struct task_struct *p, struct rq *rq, int user_tick, int ticks),\n"
+     "\tTP_ARGS(p, rq, user_tick, ticks));\n",
+     "/* op13: the kernel's own since 6.12: 3 arguments, one tick a call (scripts/oplus_fix.py) */\n"
+     "#include <trace/hooks/sched.h>\n"),
+    ("sched/sched_assist/sa_common.c",
+     '#define CREATE_TRACE_POINTS\n#include "cputime.h"\n#undef CREATE_TRACE_POINTS\n',
+     '#include "cputime.h"\t/* op13: the kernel\'s hook, not created here (scripts/oplus_fix.py) */\n'),
+    ("sched/sched_assist/sa_common.c",
+     "\tif (*ticks == 0)\n\t\treturn;\n\ttrace_android_vh_account_task_time(p, rq, user_tick, *ticks);\n}\n"
+     "EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_account_task_time);\n",
+     "\t/* op13: the kernel fires android_vh_account_task_time itself (scripts/oplus_fix.py) */\n}\n"),
+    ("sched/sched_assist/sched_assist.c",
+     "\tREGISTER_TRACE_VH(android_vh_account_process_tick_gran, android_vh_account_process_tick_gran_handler);\n",
+     "\t/* op13: no android_vh_account_process_tick_gran in 6.18 (scripts/oplus_fix.py) */\n"),
+    # (sched_info takes android_vh_irqtime_account_process_tick: CONFIG_IRQ_TIME_ACCOUNTING=y, 4 arguments still)
+    ("sched/task_cpustats/task_cpustats.c",
+     "static void account_task_time_handler(void *data, struct task_struct *p, struct rq *rq, int user_tick, int ticks)\n{\n",
+     "static void account_task_time_handler(void *data, struct task_struct *p, struct rq *rq, int user_tick)\n{\n"
+     "\tconst int ticks = 1;\t/* op13: the kernel's hook, a tick a call (scripts/oplus_fix.py) */\n"),
+    ("sched/task_sched/task_sched_info.c",
+     "static void ctp_send_message_handler(void *data, struct task_struct *p, struct rq *rq, int user_tick, int ticks)\n",
+     "static void ctp_send_message_handler(void *data, struct task_struct *p, struct rq *rq, int user_tick)\t/* op13 */\n"),
+    ("detection/task_overtime.c",
+     "void get_task_time_handler(void *data, struct task_struct *task, struct rq *rq, int tick, int ticks)\n{\n",
+     "void get_task_time_handler(void *data, struct task_struct *task, struct rq *rq, int tick)\t/* op13: 6.18's hook */\n{\n"
+     "\tconst int ticks = 1;\t/* op13: a tick a call (scripts/oplus_fix.py) */\n"),
+    # (task_struct's cpu is thread_info's on arm64 since 5.16)
+    ("detection/task_overtime.c", "cpufreq_quick_get(task->cpu)", "cpufreq_quick_get(task_cpu(task))"),
+    # the sched_stat_runtime tracepoint has no vruntime since 6.8
+    ("sched/sched_info/osi_tasktrack.c",
+     "void sched_stat_runtime_handler(void *unused,\n\t\t\tstruct task_struct *tsk, u64 runtime, u64 vruntime)\n",
+     "void sched_stat_runtime_handler(void *unused,\n\t\t\tstruct task_struct *tsk, u64 runtime)\t/* op13: 6.8+ */\n"),
+    ("sched/sched_assist/sa_priority.c",
+     "void android_vh_sched_stat_runtime_handler(void *unused, struct task_struct *task, u64 delta_exec, u64 vruntime)\n",
+     "void android_vh_sched_stat_runtime_handler(void *unused, struct task_struct *task, u64 delta_exec)\t/* op13: 6.8+ */\n"),
+    ("sched/sched_assist/sa_priority.h",
+     "void android_vh_sched_stat_runtime_handler(void *unused, struct task_struct *task, u64 delta_exec, u64 vruntime);\n",
+     "void android_vh_sched_stat_runtime_handler(void *unused, struct task_struct *task, u64 delta_exec);\t/* op13: 6.8+ */\n"),
+    # 6.18's android_vh_reweight_entity runs inside reweight_entity() and hands the weight to set;
+    # OnePlus' handler reweights the entity itself, as their 6.6 kernel's hook let it. OnePlus' 6.12
+    # port leaves it unregistered ("until the gki image contains the android_vh_reweight_entity newest
+    # hook"): so here
+    ("sched/sched_assist/sched_assist.c",
+     "#ifdef CONFIG_OPLUS_SCHED_GROUP_OPT\n\tREGISTER_TRACE_VH(android_vh_reweight_entity, android_vh_reweight_entity_handler);\n#endif\n",
+     "#if 0\t/* op13: 6.18's hook sets the weight inside reweight_entity(), as OnePlus' 6.12 port (scripts/oplus_fix.py) */\n"
+     "\tREGISTER_TRACE_VH(android_vh_reweight_entity, android_vh_reweight_entity_handler);\n#endif\n"),
+    # task_is_runnable() is the kernel's own since 6.12 (on the runqueue, not delayed): OnePlus' (on
+    # the runqueue, TASK_RUNNING, not running) under its own name, as their 6.12 port has it
+    ("sched/sched_assist/sa_common.c",
+     "bool task_is_runnable(struct task_struct *task)\n{\n",
+     "bool oplus_task_is_runnable(struct task_struct *task)\t/* op13: the kernel has task_is_runnable() */\n{\n"),
+    ("sched/sched_assist/sa_common.h",
+     "bool task_is_runnable(struct task_struct *task);\n",
+     "bool oplus_task_is_runnable(struct task_struct *task);\t/* op13 */\n"),
+    ("sched/sched_assist/sa_balance.c",
+     "if (!task_is_runnable(task))",
+     "if (!oplus_task_is_runnable(task))"),
+    # android_vh_dm_bufio_shrink_scan_bypass is not in 6.18 (nor in 6.12): OnePlus' block-I/O UX boost
+    # of dm-bufio's shrinker has nothing to attach to
+    ("sched/sched_assist/sa_blockio.c",
+     "\tret = register_trace_android_vh_dm_bufio_shrink_scan_bypass(\n\t\t\tdm_bufio_shrink_scan_bypass_handler, NULL);\n",
+     "\t(void)dm_bufio_shrink_scan_bypass_handler;\t/* op13: no such hook in 6.18 (scripts/oplus_fix.py) */\n"),
+    ("sched/sched_assist/sa_blockio.c",
+     "\tunregister_trace_android_vh_dm_bufio_shrink_scan_bypass(\n\t\t\tdm_bufio_shrink_scan_bypass_handler, NULL);\n",
+     ""),
+    # binder's hook for releasing a process's extra work list is android_vh_binder_check_special_work
+    # in 6.18 (the same arguments, the same place in binder_deferred_release(); OnePlus' 6.12 code
+    # uses it): without it the foreground list's work would not be released with its process
+    ("ipc/binder_sched.c",
+     "register_trace_android_vh_binder_release_special_work(",
+     "register_trace_android_vh_binder_check_special_work(\t/* op13: 6.18's name */"),
+    # f2fs_write_checkpoint's tracepoint passes the phase (fs/f2fs/f2fs.h enum f2fs_cp_phase) since
+    # 6.13, not its message: the message back from it
+    ("io_metrics/f2fs_metrics.c",
+     "#else\nstatic void cb_f2fs_write_checkpoint(void *ignore, struct super_block *sb,\n"
+     "                                               int reason, const char *msg)\n"
+     "#endif /* LINUX_VERSION_CODE <= KERNEL_VERSION(5, 15, 0) */\n{\n",
+     "#else\nstatic void cb_f2fs_write_checkpoint(void *ignore, struct super_block *sb,\n"
+     "                                               int reason, u16 phase)\t/* op13: 6.13+ */\n"
+     "#endif /* LINUX_VERSION_CODE <= KERNEL_VERSION(5, 15, 0) */\n{\n"
+     "    /* op13: CP_PHASE_START_BLOCK_OPS, _FINISH_BLOCK_OPS, _FINISH_CHECKPOINT (scripts/oplus_fix.py) */\n"
+     "    const char *msg = phase == 0 ? \"start block_ops\" : phase == 2 ? \"finish checkpoint\" : \"finish block_ops\";\n"),
     # nxp-nci asks an unpublished OnePlus module for the NFC chip's ID (get_nfc_id); OnePlus' own
     # earlier way, left commented out under it, reads the ID GPIO in this driver
     ("nfc/i2c_drv.c",
