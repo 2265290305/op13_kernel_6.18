@@ -19,3 +19,20 @@ oplus_network_tcpdump_enhance
 oplus_network_vip_task
 oplus_icc_mcu
 inte
+# diag: in the phone's system_dlkm, no source in any of the trees above
+diag
+# Not needed here (checked 2026-11-26), left out the same way:
+# xhci_sideband: on 6.18 part of xhci-hcd itself (CONFIG_USB_XHCI_SIDEBAND=y), no module of its own
+xhci_sideband
+# oplus_ss_sleep_monitor: the same source as oplus_subsys_sleep_monitor (its Kbuild's older name),
+# which is built; the phone loads both, the second one's /proc entries collide
+oplus_ss_sleep_monitor
+# tcsrcc_tuna: the SM8850's (tuna) TCSR clocks, not the SM8750's
+tcsrcc_tuna
+# tms_device_modules: TMS (THN31) NFC/eSE chips; the OnePlus 13's device tree has only its NXP chip
+# (nq@28, built: nxp_nci)
+tms_device_modules
+# usb_f_rndis: tools/config_gki.sh (Qualcomm's usb_f_gsi exports the same rndis_* functions)
+usb_f_rndis
+# drm_dp_aux_bus: nothing the phone loads depends on it (no DisplayPort panel on its AUX bus)
+drm_dp_aux_bus
