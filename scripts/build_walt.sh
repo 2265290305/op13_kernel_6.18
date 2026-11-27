@@ -49,7 +49,12 @@ if find "$ROOT/out/vendor/op13/obj" -name oplus_bsp_sched_assist.ko 2>/dev/null 
 	CPU=$ROOT/out/vendor/op13/tree/vendor/oplus/kernel/cpu
 fi
 echo "build_walt: OnePlus' scheduler headers from $CPU"
-INCS="-nostdinc -I$S/include -I$W/inc -I$CPU/sched -I$CPU -idirafter $C"
+# ... ahead of the SoC tree's include/: its sched_assist/ and frame_boost/ are links to the OnePlus
+# 15's sources (sa_fair.h: android_rvh_replace_next_task_fair_handler(), the per-task struct). WALT
+# was built against those with the OnePlus 13's sched_assist loaded (test-62): its call of the
+# OnePlus 13's handler, which took two more arguments, corrupted its stack at the first pick
+oplus_overlay "$W/oinc" "${CPU%/kernel/cpu}"
+INCS="-nostdinc -I$W/oinc -I$S/include -I$W/inc -I$CPU/sched -I$CPU -idirafter $C"
 # kmake <dir> <log> <extra symbols>
 kmake() {
 	set +e

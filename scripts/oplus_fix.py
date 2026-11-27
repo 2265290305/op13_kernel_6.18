@@ -149,9 +149,144 @@ EDITS = [
     # pick_next_task_fair() does)
     ("sa_fair.c",
      "extern void set_next_entity(struct cfs_rq *cfs_rq, struct sched_entity *se);\n", ""),
+    # android_rvh_replace_next_task_fair is (rq, &p, prev) in 6.18: pick_next_task_fair() makes the
+    # task it is handed current, its entities included (set_next_entity()), itself. WALT owns the hook
+    # and calls sched_assist's handler with the replacement flag, as OnePlus' 6.12 port has it
+    # (rq, p, repick, prev); the OnePlus 13's (6.6) handler took the entity and the "simple" path too
+    # and set the entities next itself. Its 7-argument handler called with WALT's 5 corrupted WALT's
+    # stack (test-62: "stack-protector: Kernel stack is corrupted in:
+    # walt_cfs_replace_next_task_fair"): the OnePlus 13's handler, its UX, DDL and locking picks take
+    # the 6.12 arguments, as OnePlus' 6.12 port does
     ("sa_fair.c",
-     "\t\t\tset_next_entity(cfs_rq, *se);\n",
-     "\t\t\tset_next_entity(cfs_rq, *se, true);\n"),
+     "void android_rvh_replace_next_task_fair_handler(void *unused,\n"
+     "\t\tstruct rq *rq, struct task_struct **p, struct sched_entity **se, bool *repick, bool simple, struct task_struct *prev)\n"
+     "{\n"
+     "\toplus_replace_next_task_fair(rq, p, se, repick, simple);\n"
+     "#ifdef CONFIG_LOCKING_PROTECT\n"
+     "\tif (*repick != true)\n"
+     "\t\tLOCKING_CALL_OP(replace_next_task_fair, rq, p, se, repick, simple);\n"
+     "#endif\n"
+     "\n"
+     "#if IS_ENABLED(CONFIG_OPLUS_FEATURE_SCHED_DDL)\n"
+     "\tif (*repick != true && global_sched_ddl_enabled)\n"
+     "\t\toplus_replace_next_task_ddl(rq, p, se, repick, simple);\n"
+     "#endif\n"
+     "\n"
+     "\t/*\n"
+     "\t* NOTE:\n"
+     "\t* Because the following code is not merged in kernel-5.15,\n"
+     "\t* set_next_entity() will no longer be called to remove the\n"
+     "\t* task from the red-black tree when pick_next_task_fair(),\n"
+     "\t* so we remove the picked task here.\n"
+     "\t*\n"
+     "\t* https://android-review.googlesource.com/c/kernel/common/+/1667002\n"
+     "\t*/\n"
+     "\tif (simple && true == *repick) {\n"
+     "\t\tfor_each_sched_entity((*se)) {\n"
+     "\t\t\tstruct cfs_rq *cfs_rq = cfs_rq_of(*se);\n"
+     "\t\t\tset_next_entity(cfs_rq, *se);\n"
+     "\t\t}\n"
+     "\t}\n"
+     "}\n",
+     "/* op13: 6.18's hook, OnePlus' 6.12 arguments (scripts/oplus_fix.py) */\n"
+     "void android_rvh_replace_next_task_fair_handler(void *unused,\n"
+     "\t\tstruct rq *rq, struct task_struct **p, bool *repick, struct task_struct *prev)\n"
+     "{\n"
+     "\toplus_replace_next_task_fair(rq, p, repick);\n"
+     "#ifdef CONFIG_LOCKING_PROTECT\n"
+     "\tif (*repick != true)\n"
+     "\t\tLOCKING_CALL_OP(replace_next_task_fair, rq, p, repick);\n"
+     "#endif\n"
+     "\n"
+     "#if IS_ENABLED(CONFIG_OPLUS_FEATURE_SCHED_DDL)\n"
+     "\tif (*repick != true && global_sched_ddl_enabled)\n"
+     "\t\toplus_replace_next_task_ddl(rq, p, repick);\n"
+     "#endif\n"
+     "\t/* the picked task's entities: pick_next_task_fair() sets them next */\n"
+     "}\n"),
+    # (the same, in a tree an older oplus_fix.py edited: set_next_entity()'s third argument)
+    ("sa_fair.c",
+     "void android_rvh_replace_next_task_fair_handler(void *unused,\n"
+     "\t\tstruct rq *rq, struct task_struct **p, struct sched_entity **se, bool *repick, bool simple, struct task_struct *prev)\n"
+     "{\n"
+     "\toplus_replace_next_task_fair(rq, p, se, repick, simple);\n"
+     "#ifdef CONFIG_LOCKING_PROTECT\n"
+     "\tif (*repick != true)\n"
+     "\t\tLOCKING_CALL_OP(replace_next_task_fair, rq, p, se, repick, simple);\n"
+     "#endif\n"
+     "\n"
+     "#if IS_ENABLED(CONFIG_OPLUS_FEATURE_SCHED_DDL)\n"
+     "\tif (*repick != true && global_sched_ddl_enabled)\n"
+     "\t\toplus_replace_next_task_ddl(rq, p, se, repick, simple);\n"
+     "#endif\n"
+     "\n"
+     "\t/*\n"
+     "\t* NOTE:\n"
+     "\t* Because the following code is not merged in kernel-5.15,\n"
+     "\t* set_next_entity() will no longer be called to remove the\n"
+     "\t* task from the red-black tree when pick_next_task_fair(),\n"
+     "\t* so we remove the picked task here.\n"
+     "\t*\n"
+     "\t* https://android-review.googlesource.com/c/kernel/common/+/1667002\n"
+     "\t*/\n"
+     "\tif (simple && true == *repick) {\n"
+     "\t\tfor_each_sched_entity((*se)) {\n"
+     "\t\t\tstruct cfs_rq *cfs_rq = cfs_rq_of(*se);\n"
+     "\t\t\tset_next_entity(cfs_rq, *se, true);\n"
+     "\t\t}\n"
+     "\t}\n"
+     "}\n",
+     "/* op13: 6.18's hook, OnePlus' 6.12 arguments (scripts/oplus_fix.py) */\n"
+     "void android_rvh_replace_next_task_fair_handler(void *unused,\n"
+     "\t\tstruct rq *rq, struct task_struct **p, bool *repick, struct task_struct *prev)\n"
+     "{\n"
+     "\toplus_replace_next_task_fair(rq, p, repick);\n"
+     "#ifdef CONFIG_LOCKING_PROTECT\n"
+     "\tif (*repick != true)\n"
+     "\t\tLOCKING_CALL_OP(replace_next_task_fair, rq, p, repick);\n"
+     "#endif\n"
+     "\n"
+     "#if IS_ENABLED(CONFIG_OPLUS_FEATURE_SCHED_DDL)\n"
+     "\tif (*repick != true && global_sched_ddl_enabled)\n"
+     "\t\toplus_replace_next_task_ddl(rq, p, repick);\n"
+     "#endif\n"
+     "\t/* the picked task's entities: pick_next_task_fair() sets them next */\n"
+     "}\n"),
+    ("sa_fair.c",
+     "void oplus_replace_next_task_fair(struct rq *rq, struct task_struct **p, struct sched_entity **se, bool *repick, bool simple)\n",
+     "void oplus_replace_next_task_fair(struct rq *rq, struct task_struct **p, bool *repick)\t/* op13: 6.12's */\n"),
+    ("sa_fair.c", "\t\t\t*p = candidate;\n\t\t\t*se = &candidate->se;\n", "\t\t\t*p = candidate;\t/* op13: its entity is the kernel's to set */\n"),
+    ("sched/sched_assist/sa_fair.h",
+     "void oplus_replace_next_task_fair(struct rq *rq, struct task_struct **p, struct sched_entity **se, bool *repick, bool simple);\n",
+     "void oplus_replace_next_task_fair(struct rq *rq, struct task_struct **p, bool *repick);\t/* op13: 6.12's */\n"),
+    ("sched/sched_assist/sa_fair.h",
+     "void android_rvh_replace_next_task_fair_handler(void *unused, struct rq *rq, struct task_struct **p, struct sched_entity **se,\n"
+     "\tbool *repick, bool simple, struct task_struct *prev);\n",
+     "void android_rvh_replace_next_task_fair_handler(void *unused, struct rq *rq, struct task_struct **p,\n"
+     "\tbool *repick, struct task_struct *prev);\t/* op13: 6.12's (WALT calls it) */\n"),
+    ("sched/sched_assist/sa_ddl.c",
+     "void oplus_replace_next_task_ddl(struct rq *rq, struct task_struct **p,\n\tstruct sched_entity **se, bool *repick, bool simple)\n",
+     "void oplus_replace_next_task_ddl(struct rq *rq, struct task_struct **p,\n\tbool *repick)\t/* op13: 6.12's */\n"),
+    ("sched/sched_assist/sa_ddl.c", "\t\t*p = ots->task;\n\t\t*se = &ots->task->se;\n", "\t\t*p = ots->task;\t/* op13: its entity is the kernel's to set */\n"),
+    ("sched/sched_assist/sa_ddl.h",
+     "void oplus_replace_next_task_ddl(struct rq *rq, struct task_struct **p,\n\tstruct sched_entity **se, bool *repick, bool simple);\n",
+     "void oplus_replace_next_task_ddl(struct rq *rq, struct task_struct **p,\n\tbool *repick);\t/* op13: 6.12's */\n"),
+    ("sched/sched_assist/sa_common.h",
+     "\tvoid (*replace_next_task_fair)(struct rq *rq,\n\t\t\tstruct task_struct **p, struct sched_entity **se, bool *repick, bool simple);\n",
+     "\tvoid (*replace_next_task_fair)(struct rq *rq,\n\t\t\tstruct task_struct **p, bool *repick);\t/* op13: 6.12's */\n"),
+    ("synchronize/sched_assist_locking.c",
+     "void replace_next_task_fair_locking(struct rq *rq, struct task_struct **p,\n\t\t\t\t\tstruct sched_entity **se, bool *repick, bool simple)\n",
+     "void replace_next_task_fair_locking(struct rq *rq, struct task_struct **p,\n\t\t\t\t\tbool *repick)\t/* op13: 6.12's (scripts/oplus_fix.py) */\n"),
+    ("synchronize/sched_assist_locking.c", "\tif (!rq || !p || !se)\n\t\treturn;\n", "\tif (!rq || !p)\t/* op13: no entity argument */\n\t\treturn;\n"),
+    ("synchronize/sched_assist_locking.c", "\t\t\t*p = key_task;\n\t\t\t*se = key_se;\n", "\t\t\t*p = key_task;\t/* op13: its entity is the kernel's to set */\n"),
+    # 6.12+ (EEVDF's delayed dequeue): an entity that slept but is kept queued until its lag is spent
+    # is no task to run; OnePlus' 6.12 port skips it here
+    ("synchronize/sched_assist_locking.c",
+     "\t\tkey_se = &key_task->se;\n\n\t\tif (!test_task_is_fair(key_task) || !task_inlock(key_ots)\n",
+     "\t\tkey_se = &key_task->se;\n\n"
+     "\t\t/* op13: a delayed-dequeue entity is not runnable (6.12+; OnePlus' 6.12 port) */\n"
+     "\t\tif (key_se->sched_delayed)\n\t\t\tcontinue;\n\n"
+     "\t\tif (!test_task_is_fair(key_task) || !task_inlock(key_ots)\n"),
     # frame_boost: android_vh_binder_restore_priority has no task argument in 6.18; binder calls it
     # from the replying thread itself (binder_transaction(), before binder_restore_priority(thread))
     ("frame_group.c",
@@ -476,6 +611,8 @@ def main(argv):
                 continue
             path = os.path.join(dp, base)
             text = open(path, encoding="utf-8", errors="surrogateescape").read()
+            if old not in text and "\r\n" in text:
+                old, new = old.replace("\n", "\r\n"), new.replace("\n", "\r\n")	# a CRLF source
             if new and new in text:
                 continue		# already applied (some edits keep the old text inside the new)
             if unless and unless in text:
