@@ -2,7 +2,7 @@
 
 An Android common kernel **6.18** port for the **OnePlus 13** (Snapdragon 8 Elite, **SM8750** / `sun`), with the vendor modules rebuilt for 6.18.
 
-> **Status: boots to ColorOS** (test-56, 2026-11-25: the first 6.18 kernel to do so on the OnePlus 13). Still a test kernel: only run it with `fastboot boot` (see below); nothing here flashes your phone.
+> **Status: boots to ColorOS** (test-56, 2026-11-25: the first 6.18 kernel to do so on the OnePlus 13; latest: test-64, 2026-11-27, with the OnePlus 13's own scheduler modules). Still a test kernel: only run it with `fastboot boot` (see below); nothing here flashes your phone.
 
 | | |
 |:--|:--|
@@ -16,16 +16,17 @@ An Android common kernel **6.18** port for the **OnePlus 13** (Snapdragon 8 Elit
 | | |
 |:--|:--|
 | Works | Boot to ColorOS, display and touch, GPU, adb, Wi-Fi, fingerprint (FOD), camera, flashlight and face unlock (test-58) |
-| Partly | Brightness: set from settings and kept across screen-on/AOD; OnePlus' unpublished display extension is missing, so its extras are too (the panel's PWM mode switch at low brightness, `/dev/oplus_display`); AOD picks the panel's own AOD-high/low level from the requested brightness (test-59). The display sometimes stops updating |
+| Partly | Brightness and AOD: brightness is set from settings and kept across screen-on/AOD, and AOD picks the panel's own AOD-high/low level (test-59), but the display driver is built from the OnePlus 15's Qualcomm sources without OnePlus' display extension, so `/dev/oplus_display`, `/sys/kernel/oplus_display` and what OnePlus' display services do through them (the panel's PWM switch at low brightness, its AOD modes, ...) are missing. The OnePlus 13's extension is published (`display-drivers/oplus/SM8750`): moving the display driver to the OnePlus 13's sources with it is the next step. The display sometimes stops updating |
+| Known issues | Battery drains faster than on the stock kernel (being looked into) |
 | Root | KernelSU built in: [BakaSU](https://github.com/Baka-SU/BakaSU), pinned in [`scripts/fetch.sh`](scripts/fetch.sh) (test-59) |
-| Scheduler | WALT, Qualcomm's scheduler and its `walt` CPU governor ([`scripts/build_walt.sh`](scripts/build_walt.sh)), works (test-60), on the OnePlus 13's own scheduler modules (`sched_assist` and its group, test-62), with OnePlus' CPU close loop (test-61): only `boot-full` loads them; without them the vendor's switch to `walt` gets `schedutil` |
+| Scheduler | WALT, Qualcomm's scheduler and its `walt` CPU governor ([`scripts/build_walt.sh`](scripts/build_walt.sh)), works (test-60), on the OnePlus 13's own scheduler modules (`sched_assist` and its group: built test-62, booting test-64 once ported to 6.18's delayed dequeue of sleeping tasks, [`scripts/oplus_fix.py`](scripts/oplus_fix.py)), with OnePlus' CPU close loop (test-61): only `boot-full` loads them; without them the vendor's switch to `walt` gets `schedutil` |
 | Not built | OnePlus' zsmalloc fork and what uses it (hybridswap, zram tuning: its page-migration code predates 6.17's rework), GEAS (needs OnePlus' hooks in the SoC's memlat/bwmon), and modules OnePlus has not published |
 
 Each release's notes say what changed and what is known to be broken.
 
 ## How it works
 
-A 6.6 kernel's vendor modules cannot load on 6.18, so the port is mostly about the modules (706 of them, every versioned import checked against its provider at build time):
+A 6.6 kernel's vendor modules cannot load on 6.18, so the port is mostly about the modules (712 of them, every versioned import checked against its provider at build time):
 
 1. **Kernel** — Google's ACK 6.18 with the edits the vendor drivers need ([`tools/prep_common.sh`](tools/prep_common.sh): vendor hooks they call, behaviour of 6.6 they rely on, boot diagnostics) and `gki_defconfig` plus a few options ([`tools/config_gki.sh`](tools/config_gki.sh)).
 2. **SoC drivers** — clocks, pinctrl, interconnects, RPMh, SMMU, UFS, USB, PCIe, … from OnePlus' SM8850 (OnePlus 15) kernel tree, which also carries the SM8750 `sun` target, with the Xiaomi 13 port's 6.12 → 6.18 adaptation ([`scripts/build_soc.sh`](scripts/build_soc.sh), [`configs/op13_overrides.bzl`](configs/op13_overrides.bzl)).
@@ -63,10 +64,11 @@ fastboot boot boot-full-testNN.img
 
 `fastboot boot` runs the image once from RAM; the next reboot is your installed kernel again. **Never `fastboot flash` these images.**
 
+Releases carry `boot-full-testNN.img`: 6.18 with every driver loaded. Each CI run also makes two images for narrowing problems down (in its artifacts, not released):
+
 | Image | What it is |
 |:--|:--|
-| `boot-full.img` | The port: 6.18 with every driver loaded. **Test this one.** |
-| `boot.img` | The same modules, but the drivers new to the port (audio, camera, Wi-Fi, charger, …) are held back, not loaded: a fallback for narrowing a problem down. It stops at the boot animation (no sound card). |
+| `boot.img` | The same modules, but the drivers new to the port (audio, camera, Wi-Fi, charger, …) are held back, not loaded. It stops at the boot animation (no sound card). |
 | `diag-nolayer.img` | The bare 6.18 kernel without our modules: it reaches first-stage init and reboots on its own after ~15 s. |
 
 ### When it stops
@@ -85,7 +87,7 @@ The log is a 256 KB ring (the stock kernel's layout, so the stock kernel can rea
 
 - **[JiaqiLi404/android_kernel_618_for_sm8550](https://github.com/JiaqiLi404/android_kernel_618_for_sm8550)** — the Xiaomi 13 Pro (SM8550) 6.18 port this project is based on: its 6.12 → 6.18 SoC integration, the vendor-module build approach, the GKI edits and the boot-image method are reused here.
 - **[OnePlusOSS](https://github.com/OnePlusOSS)** — [android_kernel_oneplus_sm8850](https://github.com/OnePlusOSS/android_kernel_oneplus_sm8850), [android_kernel_modules_and_devicetree_oneplus_sm8850](https://github.com/OnePlusOSS/android_kernel_modules_and_devicetree_oneplus_sm8850) and [android_kernel_modules_and_devicetree_oneplus_sm8750](https://github.com/OnePlusOSS/android_kernel_modules_and_devicetree_oneplus_sm8750).
-- **[LineageOS/android_kernel_oneplus_sm8650-modules](https://github.com/LineageOS/android_kernel_oneplus_sm8650-modules)** — OnePlus' published display extension for the OnePlus 12, read for how the composer's brightness property is meant to work (the OnePlus 13's is not published).
+- **[LineageOS/android_kernel_oneplus_sm8650-modules](https://github.com/LineageOS/android_kernel_oneplus_sm8650-modules)** — OnePlus' published display extension for the OnePlus 12, read for how the composer's brightness property is meant to work.
 - **[Baka-SU/BakaSU](https://github.com/Baka-SU/BakaSU)** — the KernelSU built into the kernel.
 - **Qualcomm** — the SoC and techpack drivers in those trees.
 - **Google** — [Android Common Kernel](https://android.googlesource.com/kernel/common), [clang prebuilts](https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86) and [mkbootimg](https://android.googlesource.com/platform/system/tools/mkbootimg).
