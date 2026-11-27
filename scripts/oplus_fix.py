@@ -192,6 +192,7 @@ EDITS = [
      "void android_rvh_replace_next_task_fair_handler(void *unused,\n"
      "\t\tstruct rq *rq, struct task_struct **p, bool *repick, struct task_struct *prev)\n"
      "{\n"
+     "\tstruct task_struct *k618_picked = *p;\n\n"
      "\toplus_replace_next_task_fair(rq, p, repick);\n"
      "#ifdef CONFIG_LOCKING_PROTECT\n"
      "\tif (*repick != true)\n"
@@ -203,6 +204,17 @@ EDITS = [
      "\t\toplus_replace_next_task_ddl(rq, p, repick);\n"
      "#endif\n"
      "\t/* the picked task's entities: pick_next_task_fair() sets them next */\n"
+     "\n"
+     "\t/*\n"
+     "\t * op13: 6.12+ keeps a task that slept queued until its lag is spent (EEVDF's delayed\n"
+     "\t * dequeue). The OnePlus 13's (6.6) UX, DDL and locking lists know nothing of it: a pick of\n"
+     "\t * such a task ran a sleeping task, and its next dequeue was a second one (test-63: WALT's\n"
+     "\t * \"double dequeue detected\", walt.c). The kernel's own pick stands then.\n"
+     "\t */\n"
+     "\tif (*p && *p != k618_picked && (*p)->se.sched_delayed) {\n"
+     "\t\t*p = k618_picked;\n"
+     "\t\t*repick = false;\n"
+     "\t}\n"
      "}\n"),
     # (the same, in a tree an older oplus_fix.py edited: set_next_entity()'s third argument)
     ("sa_fair.c",
@@ -240,6 +252,7 @@ EDITS = [
      "void android_rvh_replace_next_task_fair_handler(void *unused,\n"
      "\t\tstruct rq *rq, struct task_struct **p, bool *repick, struct task_struct *prev)\n"
      "{\n"
+     "\tstruct task_struct *k618_picked = *p;\n\n"
      "\toplus_replace_next_task_fair(rq, p, repick);\n"
      "#ifdef CONFIG_LOCKING_PROTECT\n"
      "\tif (*repick != true)\n"
@@ -251,7 +264,93 @@ EDITS = [
      "\t\toplus_replace_next_task_ddl(rq, p, repick);\n"
      "#endif\n"
      "\t/* the picked task's entities: pick_next_task_fair() sets them next */\n"
+     "\n"
+     "\t/*\n"
+     "\t * op13: 6.12+ keeps a task that slept queued until its lag is spent (EEVDF's delayed\n"
+     "\t * dequeue). The OnePlus 13's (6.6) UX, DDL and locking lists know nothing of it: a pick of\n"
+     "\t * such a task ran a sleeping task, and its next dequeue was a second one (test-63: WALT's\n"
+     "\t * \"double dequeue detected\", walt.c). The kernel's own pick stands then.\n"
+     "\t */\n"
+     "\tif (*p && *p != k618_picked && (*p)->se.sched_delayed) {\n"
+     "\t\t*p = k618_picked;\n"
+     "\t\t*repick = false;\n"
+     "\t}\n"
      "}\n"),
+    # (a tree an earlier oplus_fix.py edited: the handler as e80fb3f wrote it gains the guard)
+    ("sa_fair.c",
+     "\t\tstruct rq *rq, struct task_struct **p, bool *repick, struct task_struct *prev)\n{\n"
+     "\toplus_replace_next_task_fair(rq, p, repick);\n",
+     "\t\tstruct rq *rq, struct task_struct **p, bool *repick, struct task_struct *prev)\n{\n"
+     "\tstruct task_struct *k618_picked = *p;\n\n"
+     "\toplus_replace_next_task_fair(rq, p, repick);\n"),
+    ("sa_fair.c",
+     "\t/* the picked task's entities: pick_next_task_fair() sets them next */\n}\n",
+     "\t/* the picked task's entities: pick_next_task_fair() sets them next */\n"
+     "\n"
+     "\t/*\n"
+     "\t * op13: 6.12+ keeps a task that slept queued until its lag is spent (EEVDF's delayed\n"
+     "\t * dequeue). The OnePlus 13's (6.6) UX, DDL and locking lists know nothing of it: a pick of\n"
+     "\t * such a task ran a sleeping task, and its next dequeue was a second one (test-63: WALT's\n"
+     "\t * \"double dequeue detected\", walt.c). The kernel's own pick stands then.\n"
+     "\t */\n"
+     "\tif (*p && *p != k618_picked && (*p)->se.sched_delayed) {\n"
+     "\t\t*p = k618_picked;\n"
+     "\t\t*repick = false;\n"
+     "\t}\n"
+     "}\n"),
+    # EEVDF's delayed dequeue (6.12+) in the OnePlus 13's (6.6) scheduler group: the checks OnePlus'
+    # 6.12 port (the OnePlus 15's tree) makes, at the same places. A delayed task has slept: it is
+    # no UX, DDL or balance candidate. Without them the OnePlus 13's lists held sleeping tasks and
+    # picked them to run (test-63: WALT's "double dequeue detected" at the task's next dequeue)
+    ("sched/sched_assist/sa_common.c",
+     "\t} else if (task_on_rq_queued(t)) {\n",
+     "\t} else if (task_on_rq_queued(t) && !t->se.sched_delayed) {\t/* op13: 6.12+ (OnePlus' 6.12 port) */\n"),
+    ("sched/sched_assist/sa_common.c",
+     "static void enqueue_ux_thread(struct rq *rq, struct task_struct *p)\n",
+     "static void enqueue_ux_thread(struct rq *rq, struct task_struct *p, int flags)\t/* op13: 6.12's */\n"),
+    ("sched/sched_assist/sa_common.c",
+     "\tif (unlikely(!global_sched_assist_enabled))\n\t\treturn;\n\n\toplus_set_enqueue_time(p, rq->clock);\n",
+     "\tif (unlikely(!global_sched_assist_enabled))\n\t\treturn;\n\n"
+     "\t/* op13: a delayed task is enqueued again only by its wakeup (ENQUEUE_DELAYED; OnePlus' 6.12 port) */\n"
+     "\tif (p->se.sched_delayed && !(flags & ENQUEUE_DELAYED))\n\t\treturn;\n\n"
+     "\toplus_set_enqueue_time(p, rq->clock);\n"),
+    ("sched/sched_assist/sa_common.c",
+     "void queue_ux_thread(struct rq *rq, struct task_struct *p, int enqueue)\n{\n\tif (enqueue)\n\t\tenqueue_ux_thread(rq, p);\n",
+     "void queue_ux_thread(struct rq *rq, struct task_struct *p, int enqueue, int flags)\t/* op13: 6.12's */\n{\n\tif (enqueue)\n\t\tenqueue_ux_thread(rq, p, flags);\n"),
+    ("sched/sched_assist/sa_common.c", "\tqueue_ux_thread(rq, p, 1);\n", "\tqueue_ux_thread(rq, p, 1, flags);\n"),
+    ("sched/sched_assist/sa_common.c", "\tqueue_ux_thread(rq, p, 0);\n", "\tqueue_ux_thread(rq, p, 0, flags);\n"),
+    ("sched/sched_assist/sa_common.h",
+     "void queue_ux_thread(struct rq *rq, struct task_struct *p, int enqueue);\n",
+     "void queue_ux_thread(struct rq *rq, struct task_struct *p, int enqueue, int flags);\t/* op13: 6.12's */\n"),
+    ("sched/sched_assist/sa_balance.c",
+     "int can_migrate_task(struct task_struct *p, struct lb_env *env)\n{\n\t/*\n\t * del by oplus.\n\t * int can_migrate = 1;\n\t */\n\n\tlockdep_assert_rq_held(env->src_rq);\n",
+     "int can_migrate_task(struct task_struct *p, struct lb_env *env)\n{\n\t/*\n\t * del by oplus.\n\t * int can_migrate = 1;\n\t */\n\n\tlockdep_assert_rq_held(env->src_rq);\n\n"
+     "\tif (p->se.sched_delayed)\t/* op13: 6.12+ (OnePlus' 6.12 port) */\n\t\treturn 0;\n",
+     "\tif (p->se.sched_delayed)\n\t\treturn 0;\n"),
+    ("sched/sched_assist/sa_balance.c",
+     "\tif (READ_ONCE((tsk)->__state) != TASK_RUNNING)\n\t\treturn false;\n\n\treturn ((tsk->on_rq == TASK_ON_RQ_QUEUED) && !smp_load_acquire(&tsk->on_cpu));\n",
+     "\tif (READ_ONCE((tsk)->__state) != TASK_RUNNING)\n\t\treturn false;\n\n"
+     "\tif (tsk->se.sched_delayed)\t/* op13: 6.12+ (OnePlus' 6.12 port) */\n\t\treturn false;\n\n"
+     "\treturn ((tsk->on_rq == TASK_ON_RQ_QUEUED) && !smp_load_acquire(&tsk->on_cpu));\n"),
+    ("sched/sched_assist/sa_balance.c",
+     "\t\tif (p == prime_pipeline_task)\n\t\t\tcontinue;\n\n\t\tpull_me = p;\n",
+     "\t\tif (p == prime_pipeline_task)\n\t\t\tcontinue;\n\n"
+     "\t\tif (p->se.sched_delayed)\t/* op13: 6.12+ (OnePlus' 6.12 port) */\n\t\t\tcontinue;\n\n"
+     "\t\tpull_me = p;\n"),
+    ("sched/sched_assist/sa_ddl.c",
+     "\t} else if (task->se.on_rq && !task_on_cpu(rq, task)) {\n",
+     "\t} else if (task->se.on_rq && !task_on_cpu(rq, task) && !task->se.sched_delayed) {\t/* op13: 6.12+ */\n"),
+    ("sched/sched_assist/sa_ddl.c",
+     "\t\tif (IS_ERR_OR_NULL(ots_p))\n\t\t\treturn;\n",
+     "\t\tif (IS_ERR_OR_NULL(ots_p) || p->se.sched_delayed)\t/* op13: 6.12+ */\n\t\t\treturn;\n"),
+    ("sched/sched_assist/sa_ddl.c",
+     "\tif (!p || !oplus_get_task_ddl(p) || IS_ERR_OR_NULL(ots))\n\t\treturn;\n",
+     "\tif (!p || !oplus_get_task_ddl(p) || IS_ERR_OR_NULL(ots)\n\t\t\t|| p->se.sched_delayed)\t/* op13: 6.12+ */\n\t\treturn;\n"),
+    ("sched/sched_assist/sa_ddl.c",
+     "\t\tots = __node_2_ots(node);\n\n\t\tif (IS_ERR_OR_NULL(ots)) {\n\t\t\tWARN_ON_ONCE(1);\n\t\t\tgoto out_leftmost;\n\t\t}\n",
+     "\t\tots = __node_2_ots(node);\n\n\t\tif (IS_ERR_OR_NULL(ots)) {\n\t\t\tWARN_ON_ONCE(1);\n\t\t\tgoto out_leftmost;\n\t\t}\n\n"
+     "\t\tif (ots->task && ots->task->se.sched_delayed)\t/* op13: 6.12+ */\n\t\t\tcontinue;\n",
+     "if (ots->task && ots->task->se.sched_delayed)\n"),
     ("sa_fair.c",
      "void oplus_replace_next_task_fair(struct rq *rq, struct task_struct **p, struct sched_entity **se, bool *repick, bool simple)\n",
      "void oplus_replace_next_task_fair(struct rq *rq, struct task_struct **p, bool *repick)\t/* op13: 6.12's */\n"),
@@ -611,8 +710,6 @@ def main(argv):
                 continue
             path = os.path.join(dp, base)
             text = open(path, encoding="utf-8", errors="surrogateescape").read()
-            if old not in text and "\r\n" in text:
-                old, new = old.replace("\n", "\r\n"), new.replace("\n", "\r\n")	# a CRLF source
             if new and new in text:
                 continue		# already applied (some edits keep the old text inside the new)
             if unless and unless in text:
