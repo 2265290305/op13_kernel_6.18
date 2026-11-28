@@ -6,7 +6,7 @@ cd "$ROOT"
 
 # path | url | revision
 INPUTS=(
-	"src/common|https://android.googlesource.com/kernel/common|ff4a6c3bb0f471a9dd186293a47b62c83829b97d"
+	"src/common|https://android.googlesource.com/kernel/common|531718cea1e32dd7cc6c91731f0f6a07c8aae153"
 	"ref_8550|https://github.com/JiaqiLi404/android_kernel_618_for_sm8550.git|c3956156ce7c4193c451dfda531fad72d35bfebb"
 	"src/soc|https://github.com/OnePlusOSS/android_kernel_oneplus_sm8850.git|fc30e54174d254ff7f33622a9278e4435f6718d2"
 	"src/mods8850|https://github.com/OnePlusOSS/android_kernel_modules_and_devicetree_oneplus_sm8850.git|5ab2a689ff87d7d28c511f1762cf41c1b90d965a"
